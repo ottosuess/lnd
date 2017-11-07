@@ -967,7 +967,7 @@ func CommitSpendRevoke(signer Signer, signDesc *SignDescriptor,
 	// Place a 1 as the first item in the evaluated witness stack to
 	// force script execution to the revocation clause.
 	witnessStack := wire.TxWitness(make([][]byte, 3))
-	witnessStack[0] = append(sweepSig, byte(txscript.SigHashAll))
+	witnessStack[0] = append(sweepSig, byte(signDesc.HashType))
 	witnessStack[1] = []byte{1}
 	witnessStack[2] = signDesc.WitnessScript
 
