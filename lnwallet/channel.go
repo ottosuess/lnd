@@ -1004,7 +1004,7 @@ func NewLightningChannel(signer Signer, events chainntnfs.ChainNotifier,
 	// Create the sign descriptor which we'll be using very frequently to
 	// request a signature for the 2-of-2 multi-sig from the signer in
 	// order to complete channel state transitions.
-	fundingPkScript, err := witnessScriptHash(multiSigScript)
+	fundingPkScript, err := WitnessScriptHash(multiSigScript)
 	if err != nil {
 		return nil, err
 	}
@@ -1178,23 +1178,23 @@ func newBreachRetribution(chanState *channeldb.OpenChannel, stateNum uint64,
 
 	// With the commitment point generated, we can now generate the four
 	// keys we'll need to reconstruct the commitment state,
-	keyRing := deriveCommitmentKeys(commitmentPoint, false,
+	keyRing := DeriveCommitmentKeys(commitmentPoint, false,
 		&chanState.LocalChanCfg, &chanState.RemoteChanCfg)
 
 	// Next, reconstruct the scripts as they were present at this state
 	// number so we can have the proper witness script to sign and include
 	// within the final witness.
 	remoteDelay := uint32(chanState.RemoteChanCfg.CsvDelay)
-	remotePkScript, err := commitScriptToSelf(remoteDelay, keyRing.delayKey,
+	remotePkScript, err := CommitScriptToSelf(remoteDelay, keyRing.delayKey,
 		keyRing.revocationKey)
 	if err != nil {
 		return nil, err
 	}
-	remoteWitnessHash, err := witnessScriptHash(remotePkScript)
+	remoteWitnessHash, err := WitnessScriptHash(remotePkScript)
 	if err != nil {
 		return nil, err
 	}
-	localPkScript, err := commitScriptUnencumbered(keyRing.localKey)
+	localPkScript, err := CommitScriptUnencumbered(keyRing.localKey)
 	if err != nil {
 		return nil, err
 	}
@@ -1440,7 +1440,7 @@ func (lc *LightningChannel) closeObserver(channelCloseNtfn *chainntnfs.SpendEven
 		// revocation point so we can re-construct the HTLC state and
 		// also our payment key.
 		commitPoint := lc.channelState.RemoteCurrentRevocation
-		keyRing := deriveCommitmentKeys(commitPoint, false,
+		keyRing := DeriveCommitmentKeys(commitPoint, false,
 			lc.localChanCfg, lc.remoteChanCfg)
 
 		// Next, we'll obtain HTLC resolutions for all the outgoing
@@ -1459,7 +1459,7 @@ func (lc *LightningChannel) closeObserver(channelCloseNtfn *chainntnfs.SpendEven
 		// Before we can generate the proper sign descriptor, we'll
 		// need to locate the output index of our non-delayed output on
 		// the commitment transaction.
-		selfP2WKH, err := commitScriptUnencumbered(keyRing.localKey)
+		selfP2WKH, err := CommitScriptUnencumbered(keyRing.localKey)
 		if err != nil {
 			walletLog.Errorf("unable to create self commit "+
 				"script: %v", err)
@@ -1627,11 +1627,11 @@ func (lc *LightningChannel) restoreStateLogs() error {
 	// the point derived from the commitment secret at the remote party's
 	// revocation based.
 	localCommitPoint := ComputeCommitmentPoint(ourRevPreImage[:])
-	localCommitKeys := deriveCommitmentKeys(localCommitPoint, true,
+	localCommitKeys := DeriveCommitmentKeys(localCommitPoint, true,
 		localChanCfg, remoteChanCfg)
 
 	remoteCommitPoint := lc.channelState.RemoteCurrentRevocation
-	remoteCommitKeys := deriveCommitmentKeys(remoteCommitPoint, false,
+	remoteCommitKeys := DeriveCommitmentKeys(remoteCommitPoint, false,
 		localChanCfg, remoteChanCfg)
 
 	var ourCounter, theirCounter uint64
@@ -2333,7 +2333,7 @@ func (lc *LightningChannel) SignNextCommitment() (*btcec.Signature, []*btcec.Sig
 	// used within fetchCommitmentView to derive all the keys necessary to
 	// construct the commitment state.
 	commitPoint := lc.channelState.RemoteNextRevocation
-	keyRing := deriveCommitmentKeys(commitPoint, false, lc.localChanCfg,
+	keyRing := DeriveCommitmentKeys(commitPoint, false, lc.localChanCfg,
 		lc.remoteChanCfg)
 
 	// Create a new commitment view which will calculate the evaluated
@@ -2664,7 +2664,7 @@ func (lc *LightningChannel) ReceiveNewCommitment(commitSig *btcec.Signature,
 		return err
 	}
 	commitPoint := ComputeCommitmentPoint(commitSecret[:])
-	keyRing := deriveCommitmentKeys(commitPoint, true, lc.localChanCfg,
+	keyRing := DeriveCommitmentKeys(commitPoint, true, lc.localChanCfg,
 		lc.remoteChanCfg)
 
 	// With the current commitment point re-calculated, construct the new
@@ -3243,7 +3243,7 @@ func (lc *LightningChannel) genHtlcScript(isIncoming, ourCommit bool,
 
 	// Now that we have the redeem scripts, create the P2WSH public key
 	// script for the output itself.
-	htlcP2WSH, err := witnessScriptHash(witnessScript)
+	htlcP2WSH, err := WitnessScriptHash(witnessScript)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3444,7 +3444,7 @@ func newHtlcResolution(signer Signer, localChanCfg *channeldb.ChannelConfig,
 	if err != nil {
 		return nil, err
 	}
-	htlcScriptHash, err := witnessScriptHash(htlcSweepScript)
+	htlcScriptHash, err := WitnessScriptHash(htlcSweepScript)
 	if err != nil {
 		return nil, err
 	}
@@ -3586,14 +3586,14 @@ func (lc *LightningChannel) ForceClose() (*ForceCloseSummary, error) {
 		return nil, err
 	}
 	commitPoint := ComputeCommitmentPoint(unusedRevocation[:])
-	keyRing := deriveCommitmentKeys(commitPoint, true, lc.localChanCfg,
+	keyRing := DeriveCommitmentKeys(commitPoint, true, lc.localChanCfg,
 		lc.remoteChanCfg)
-	selfScript, err := commitScriptToSelf(csvTimeout, keyRing.delayKey,
+	selfScript, err := CommitScriptToSelf(csvTimeout, keyRing.delayKey,
 		keyRing.revocationKey)
 	if err != nil {
 		return nil, err
 	}
-	payToUsScriptHash, err := witnessScriptHash(selfScript)
+	payToUsScriptHash, err := WitnessScriptHash(selfScript)
 	if err != nil {
 		return nil, err
 	}
@@ -3874,19 +3874,19 @@ func CreateCommitTx(fundingOutput *wire.TxIn, keyRing *commitmentKeyRing,
 	// output after a relative block delay, or the remote node can claim
 	// the funds with the revocation key if we broadcast a revoked
 	// commitment transaction.
-	ourRedeemScript, err := commitScriptToSelf(csvTimeout, keyRing.delayKey,
+	ourRedeemScript, err := CommitScriptToSelf(csvTimeout, keyRing.delayKey,
 		keyRing.revocationKey)
 	if err != nil {
 		return nil, err
 	}
-	payToUsScriptHash, err := witnessScriptHash(ourRedeemScript)
+	payToUsScriptHash, err := WitnessScriptHash(ourRedeemScript)
 	if err != nil {
 		return nil, err
 	}
 
 	// Next, we create the script paying to them. This is just a regular
 	// P2WPKH output, without any added CSV delay.
-	theirWitnessKeyHash, err := commitScriptUnencumbered(keyRing.paymentKey)
+	theirWitnessKeyHash, err := CommitScriptUnencumbered(keyRing.paymentKey)
 	if err != nil {
 		return nil, err
 	}
@@ -3969,7 +3969,7 @@ func (lc *LightningChannel) RemoteNextRevocation() *btcec.PublicKey {
 // deriveCommitmentKey generates a new commitment key set using the base points
 // and commitment point. The keys are derived differently depending whether the
 // commitment transaction is ours or the remote peer's.
-func deriveCommitmentKeys(commitPoint *btcec.PublicKey, isOurCommit bool,
+func DeriveCommitmentKeys(commitPoint *btcec.PublicKey, isOurCommit bool,
 	localChanCfg, remoteChanCfg *channeldb.ChannelConfig) *commitmentKeyRing {
 	keyRing := new(commitmentKeyRing)
 

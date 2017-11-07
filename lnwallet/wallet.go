@@ -649,9 +649,9 @@ func CreateCommitmentTxns(localBalance, remoteBalance btcutil.Amount,
 	localCommitPoint, remoteCommitPoint *btcec.PublicKey,
 	fundingTxIn *wire.TxIn) (*wire.MsgTx, *wire.MsgTx, error) {
 
-	localCommitmentKeys := deriveCommitmentKeys(localCommitPoint, true,
+	localCommitmentKeys := DeriveCommitmentKeys(localCommitPoint, true,
 		ourChanCfg, theirChanCfg)
-	remoteCommitmentKeys := deriveCommitmentKeys(remoteCommitPoint, false,
+	remoteCommitmentKeys := DeriveCommitmentKeys(remoteCommitPoint, false,
 		ourChanCfg, theirChanCfg)
 
 	ourCommitTx, err := CreateCommitTx(fundingTxIn, localCommitmentKeys,
@@ -1190,7 +1190,7 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 	// With their signature for our version of the commitment transactions
 	// verified, we can now generate a signature for their version,
 	// allowing the funding transaction to be safely broadcast.
-	p2wsh, err := witnessScriptHash(witnessScript)
+	p2wsh, err := WitnessScriptHash(witnessScript)
 	if err != nil {
 		req.err <- err
 		req.completeChan <- nil
