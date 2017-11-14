@@ -40,14 +40,7 @@ const (
 
 var (
 	// TODO(roasbeef): base off of datadir instead?
-	lndHomeDir          = btcutil.AppDataDir("lnd", false)
-	defaultConfigFile   = filepath.Join(lndHomeDir, defaultConfigFilename)
-	defaultDataDir      = filepath.Join(lndHomeDir, defaultDataDirname)
-	defaultTLSCertPath  = filepath.Join(lndHomeDir, defaultTLSCertFilename)
-	defaultTLSKeyPath   = filepath.Join(lndHomeDir, defaultTLSKeyFilename)
-	defaultAdminMacPath = filepath.Join(lndHomeDir, defaultAdminMacFilename)
-	defaultReadMacPath  = filepath.Join(lndHomeDir, defaultReadMacFilename)
-	defaultLogDir       = filepath.Join(lndHomeDir, defaultLogDirname)
+	lndHomeDir string
 
 	btcdHomeDir            = btcutil.AppDataDir("btcd", false)
 	defaultBtcdRPCCertFile = filepath.Join(btcdHomeDir, "rpc.cert")
@@ -141,7 +134,16 @@ type config struct {
 // 	2) Pre-parse the command line to check for an alternative config file
 // 	3) Load configuration file overwriting defaults with any specified options
 // 	4) Parse CLI options and overwrite/add any specified options
-func loadConfig() (*config, error) {
+func loadConfig(appDir string) (*config, error) {
+	lndHomeDir = appDir
+	defaultConfigFile := filepath.Join(lndHomeDir, defaultConfigFilename)
+	defaultDataDir := filepath.Join(lndHomeDir, defaultDataDirname)
+	defaultTLSCertPath := filepath.Join(lndHomeDir, defaultTLSCertFilename)
+	defaultTLSKeyPath := filepath.Join(lndHomeDir, defaultTLSKeyFilename)
+	defaultAdminMacPath := filepath.Join(lndHomeDir, defaultAdminMacFilename)
+	defaultReadMacPath := filepath.Join(lndHomeDir, defaultReadMacFilename)
+	defaultLogDir := filepath.Join(lndHomeDir, defaultLogDirname)
+
 	defaultCfg := config{
 		ConfigFile:          defaultConfigFile,
 		DataDir:             defaultDataDir,
