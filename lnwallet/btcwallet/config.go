@@ -15,6 +15,7 @@ import (
 	// to activate the side effects w/o actually binding the package name to
 	// a file-level variable.
 	_ "github.com/roasbeef/btcwallet/walletdb/bdb"
+	_ "github.com/roasbeef/btcwallet/walletdb/mdb"
 )
 
 var (

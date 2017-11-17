@@ -199,15 +199,6 @@ func LndMain(appDir string) error {
 	// "hello" for wallet encryption.
 	privateWalletPw := []byte("hello")
 	publicWalletPw := []byte("public")
-	if !cfg.NoEncryptWallet {
-		privateWalletPw, publicWalletPw, err = waitForWalletPassword(
-			grpcEndpoint, restEndpoint, serverOpts, proxyOpts,
-			tlsConf, macaroonService,
-		)
-		if err != nil {
-			return err
-		}
-	}
 
 	// With the information parsed from the configuration, create valid
 	// instances of the pertinent interfaces required to operate the
