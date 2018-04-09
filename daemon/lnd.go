@@ -713,7 +713,7 @@ func genCertPair(certFile, keyFile string) error {
 	}
 
 	// Generate a private key for the certificate.
-	priv, err := rsa.GenerateKey(rand.Reader, 4096)
+	priv, err := rsa.GenerateKey(rand.Reader, 512)
 	if err != nil {
 		return err
 	}
