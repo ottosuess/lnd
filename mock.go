@@ -14,6 +14,7 @@ import (
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	"github.com/roasbeef/btcwallet/wallet/txauthor"
 )
 
 // The block height returned by the mock BlockChainIO's GetBestBlock.
@@ -220,6 +221,12 @@ func (*mockWalletController) GetPrivKey(a btcutil.Address) (*btcec.PrivateKey, e
 
 func (*mockWalletController) SendOutputs(outputs []*wire.TxOut,
 	_ lnwallet.SatPerVByte) (*chainhash.Hash, error) {
+
+	return nil, nil
+}
+
+func (*mockWalletController) CreateSimpleTx(outputs []*wire.TxOut,
+	_ lnwallet.SatPerVByte) (*txauthor.AuthoredTx, error) {
 
 	return nil, nil
 }
