@@ -9,6 +9,7 @@ import (
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	"github.com/roasbeef/btcwallet/wallet/txauthor"
 )
 
 // ErrNotMine is an error denoting that a WalletController instance is unable
@@ -151,6 +152,15 @@ type WalletController interface {
 	// sat/vbyte that should be used when crafting the transaction.
 	SendOutputs(outputs []*wire.TxOut,
 		feeRate SatPerVByte) (*chainhash.Hash, error)
+
+	// CreateSimpleTx creates a Bitcoin transaction paying to the specified
+	// outputs. The transaction is not broadcasted to the network. In the
+	// case the wallet has insufficient funds, or the outputs are
+	// non-standard, an error should be returned. This method also takes
+	// the target fee expressed in sat/vbyte that should be used when
+	// crafting the transaction.
+	CreateSimpleTx(outputs []*wire.TxOut,
+		feeRate SatPerVByte) (*txauthor.AuthoredTx, error)
 
 	// ListUnspentWitness returns all unspent outputs which are version 0
 	// witness programs. The 'confirms' parameter indicates the minimum
