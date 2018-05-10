@@ -195,6 +195,7 @@ func main() {
 		createCommand,
 		unlockCommand,
 		newAddressCommand,
+		estimateFeeCommand,
 		sendManyCommand,
 		sendCoinsCommand,
 		connectCommand,
