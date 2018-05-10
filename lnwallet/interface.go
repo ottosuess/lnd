@@ -38,6 +38,10 @@ const (
 // transaction.
 var ErrDoubleSpend = errors.New("Transaction rejected: output already spent")
 
+// ErrNoOutputs is returned if we try to create a transaction with no outputs
+// or send coins to a set of outputs that is empty.
+var ErrNoOutputs = errors.New("no outputs")
+
 // Utxo is an unspent output denoted by its outpoint, and output value of the
 // original output.
 type Utxo struct {
