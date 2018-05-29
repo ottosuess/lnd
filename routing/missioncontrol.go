@@ -30,7 +30,9 @@ const (
 	edgeDecay = time.Duration(time.Second * 5)
 )
 
-// missionControl contains state which summarizes the past attempts of HTLC
+// missionControl is an implementation of the PaymentSessionSource interace.
+//
+// contains state which summarizes the past attempts of HTLC
 // routing by external callers when sending payments throughout the network.
 // missionControl remembers the outcome of these past routing attempts (success
 // and failure), and is able to provide hints/guidance to future HTLC routing
@@ -82,6 +84,11 @@ func newMissionControl(g *channeldb.ChannelGraph, selfNode *channeldb.LightningN
 		queryBandwidth: qb,
 		graph:          g,
 	}
+}
+
+// CommitDecay...
+func (m *missionControl) CommitDecay(_ time.Time, _ uint32) error {
+	return nil
 }
 
 // graphPruneView is a filter of sorts that path finding routines should
@@ -149,18 +156,27 @@ func (m *missionControl) GraphPruneView() graphPruneView {
 	}
 }
 
-// paymentSession is used during an HTLC routings session to prune the local
-// chain view in response to failures, and also report those failures back to
-// missionControl. The snapshot copied for this session will only ever grow,
-// and will now be pruned after a decay like the main view within mission
+type addEdge struct {
+	edge     *channeldb.ChannelEdgePolicy
+	capacity lnwire.MilliSatoshi
+}
+
+// staticPaymentSession is an implementation of the PaymentSession interface
+// that uses the current snapshot of the graph to create routes using a
+// "cheapest first" approach.
+//
+// used during an HTLC routings session to prune the
+// local chain view in response to failures, and also report those failures
+// back to missionControl. The snapshot copied for this session will only ever
+// grow, and will now be pruned after a decay like the main view within mission
 // control. We do this as we want to avoid the case where we continually try a
 // bad edge or route multiple times in a session. This can lead to an infinite
 // loop if payment attempts take long enough. An additional set of edges can
 // also be provided to assist in reaching the payment's destination.
-type paymentSession struct {
+type staticPaymentSession struct {
 	pruneViewSnapshot graphPruneView
 
-	additionalEdges map[Vertex][]*channeldb.ChannelEdgePolicy
+	additionalEdges map[Vertex][]addEdge
 
 	bandwidthHints map[uint64]lnwire.MilliSatoshi
 
@@ -174,51 +190,11 @@ type paymentSession struct {
 // view from Mission Control. An optional set of routing hints can be provided
 // in order to populate additional edges to explore when finding a path to the
 // payment's destination.
-func (m *missionControl) NewPaymentSession(routeHints [][]HopHint,
-	target *btcec.PublicKey) (*paymentSession, error) {
+func (m *missionControl) NewPaymentSession(
+	additionalEdges map[Vertex][]addEdge, _ lnwire.MilliSatoshi,
+	target *btcec.PublicKey) (PaymentSession, error) {
 
 	viewSnapshot := m.GraphPruneView()
-
-	edges := make(map[Vertex][]*channeldb.ChannelEdgePolicy)
-
-	// Traverse through all of the available hop hints and include them in
-	// our edges map, indexed by the public key of the channel's starting
-	// node.
-	for _, routeHint := range routeHints {
-		// If multiple hop hints are provided within a single route
-		// hint, we'll assume they must be chained together and sorted
-		// in forward order in order to reach the target successfully.
-		for i, hopHint := range routeHint {
-			// In order to determine the end node of this hint,
-			// we'll need to look at the next hint's start node. If
-			// we've reached the end of the hints list, we can
-			// assume we've reached the destination.
-			endNode := &channeldb.LightningNode{}
-			if i != len(routeHint)-1 {
-				endNode.AddPubKey(routeHint[i+1].NodeID)
-			} else {
-				endNode.AddPubKey(target)
-			}
-
-			// Finally, create the channel edge from the hop hint
-			// and add it to list of edges corresponding to the node
-			// at the start of the channel.
-			edge := &channeldb.ChannelEdgePolicy{
-				Node:      endNode,
-				ChannelID: hopHint.ChannelID,
-				FeeBaseMSat: lnwire.MilliSatoshi(
-					hopHint.FeeBaseMSat,
-				),
-				FeeProportionalMillionths: lnwire.MilliSatoshi(
-					hopHint.FeeProportionalMillionths,
-				),
-				TimeLockDelta: hopHint.CLTVExpiryDelta,
-			}
-
-			v := NewVertex(hopHint.NodeID)
-			edges[v] = append(edges[v], edge)
-		}
-	}
 
 	// We'll also obtain a set of bandwidthHints from the lower layer for
 	// each of our outbound channels. This will allow the path finding to
@@ -235,9 +211,9 @@ func (m *missionControl) NewPaymentSession(routeHints [][]HopHint,
 		return nil, err
 	}
 
-	return &paymentSession{
+	return &staticPaymentSession{
 		pruneViewSnapshot: viewSnapshot,
-		additionalEdges:   edges,
+		additionalEdges:   additionalEdges,
 		bandwidthHints:    bandwidthHints,
 		mc:                m,
 	}, nil
@@ -247,8 +223,8 @@ func (m *missionControl) NewPaymentSession(routeHints [][]HopHint,
 // skip all path finding, and will instead utilize a set of pre-built routes.
 // This constructor allows callers to specify their own routes which can be
 // used for things like channel rebalancing, and swaps.
-func (m *missionControl) NewPaymentSessionFromRoutes(routes []*Route) *paymentSession {
-	return &paymentSession{
+func (m *missionControl) NewPaymentSessionFromRoutes(routes []*Route) PaymentSession {
+	return &staticPaymentSession{
 		haveRoutes:     true,
 		preBuiltRoutes: routes,
 		mc:             m,
@@ -295,7 +271,7 @@ func generateBandwidthHints(sourceNode *channeldb.LightningNode,
 // added is noted, as it'll be pruned from the shared view after a period of
 // vertexDecay. However, the vertex will remain pruned for the *local* session.
 // This ensures we don't retry this vertex during the payment attempt.
-func (p *paymentSession) ReportVertexFailure(v Vertex) {
+func (p *staticPaymentSession) ReportVertexFailure(_ lnwire.MilliSatoshi, v Vertex) error {
 	log.Debugf("Reporting vertex %v failure to Mission Control", v)
 
 	// First, we'll add the failed vertex to our local prune view snapshot.
@@ -307,6 +283,7 @@ func (p *paymentSession) ReportVertexFailure(v Vertex) {
 	p.mc.Lock()
 	p.mc.failedVertexes[v] = time.Now()
 	p.mc.Unlock()
+	return nil
 }
 
 // ReportChannelFailure adds a channel to the graph prune view. The time the
@@ -316,7 +293,9 @@ func (p *paymentSession) ReportVertexFailure(v Vertex) {
 // retrying an edge after its pruning has expired.
 //
 // TODO(roasbeef): also add value attempted to send and capacity of channel
-func (p *paymentSession) ReportChannelFailure(e uint64) {
+func (p *staticPaymentSession) ReportChannelFailure(_ lnwire.MilliSatoshi,
+	hop *ChannelHop) error {
+	e := hop.ChannelID
 	log.Debugf("Reporting edge %v failure to Mission Control", e)
 
 	// First, we'll add the failed edge to our local prune view snapshot.
@@ -328,6 +307,12 @@ func (p *paymentSession) ReportChannelFailure(e uint64) {
 	p.mc.Lock()
 	p.mc.failedEdges[e] = time.Now()
 	p.mc.Unlock()
+	return nil
+}
+
+func (p *staticPaymentSession) ReportRouteSuccess(payAmt lnwire.MilliSatoshi,
+	route Route) error {
+	return nil
 }
 
 // RequestRoute returns a route which is likely to be capable for successfully
@@ -338,8 +323,10 @@ func (p *paymentSession) ReportChannelFailure(e uint64) {
 // will be explored, which feeds into the recommendations made for routing.
 //
 // NOTE: This function is safe for concurrent access.
-func (p *paymentSession) RequestRoute(payment *LightningPayment,
+func RequestRoute(r PaymentSession, payment *LightningPayment,
 	height uint32, finalCltvDelta uint16) (*Route, error) {
+
+	p := r.(*staticPaymentSession)
 
 	switch {
 	// If we have a set of pre-built routes, then we'll just pop off the
@@ -371,10 +358,11 @@ func (p *paymentSession) RequestRoute(payment *LightningPayment,
 	// Taking into account this prune view, we'll attempt to locate a path
 	// to our destination, respecting the recommendations from
 	// missionControl.
-	path, err := findPath(
-		nil, p.mc.graph, p.additionalEdges, p.mc.selfNode,
-		payment.Target, pruneView.vertexes, pruneView.edges,
-		payment.Amount, p.bandwidthHints,
+	path, err := findPath(r,
+		p.mc.selfNode,
+		payment.Target,
+		nil, nil,
+		payment.Amount,
 	)
 	if err != nil {
 		return nil, err
@@ -396,6 +384,18 @@ func (p *paymentSession) RequestRoute(payment *LightningPayment,
 	return route, err
 }
 
+func (p *staticPaymentSession) EdgeScore(payAmt lnwire.MilliSatoshi,
+	e *channeldb.ChannelEdgePolicy) (float64, error) {
+	if _, ok := p.pruneViewSnapshot.edges[e.ChannelID]; ok {
+		return 0.0, nil
+	}
+
+	if _, ok := p.bandwidthHints[e.ChannelID]; ok {
+
+	}
+	return 1.0, nil
+}
+
 // ResetHistory resets the history of missionControl returning it to a state as
 // if no payment attempts have been made.
 func (m *missionControl) ResetHistory() {
@@ -404,3 +404,78 @@ func (m *missionControl) ResetHistory() {
 	m.failedVertexes = make(map[Vertex]time.Time)
 	m.Unlock()
 }
+
+func (p *staticPaymentSession) ForEachNode(f func(*channeldb.LightningNode) error) error {
+	tx, err := p.mc.graph.Database().Begin(false)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	return p.mc.graph.ForEachNode(
+		tx,
+		func(_ *bolt.Tx, node *channeldb.LightningNode) error {
+			return f(node)
+		},
+	)
+}
+
+func (p *staticPaymentSession) ForEachChannel(nodeID *btcec.PublicKey,
+	f func(*channeldb.ChannelEdgePolicy, lnwire.MilliSatoshi) error) error {
+
+	tx, err := p.mc.graph.Database().Begin(false)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	returnWithBandwidth := func(e *channeldb.ChannelEdgePolicy,
+		capacity lnwire.MilliSatoshi) (*channeldb.ChannelEdgePolicy, lnwire.MilliSatoshi) {
+
+		edgeBandwidth, ok := p.bandwidthHints[e.ChannelID]
+		if !ok {
+			// If we don't have a hint for this edge, then
+			// we'll just use the known Capacity as the
+			// available bandwidth.
+			edgeBandwidth = capacity
+		}
+		return e, edgeBandwidth
+	}
+
+	node, err := p.mc.graph.FetchLightningNode(nodeID)
+	if err != nil {
+		return err
+	}
+
+	err = node.ForEachChannel(
+		tx,
+		func(_ *bolt.Tx, edgeInfo *channeldb.ChannelEdgeInfo,
+			outEdge, inEdge *channeldb.ChannelEdgePolicy) error {
+			return f(
+				returnWithBandwidth(outEdge,
+					lnwire.NewMSatFromSatoshis(
+						edgeInfo.Capacity),
+				),
+			)
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, e := range p.additionalEdges[NewVertex(nodeID)] {
+		if err := f(returnWithBandwidth(e.edge, e.capacity)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *staticPaymentSession) Bandwidth(c uint64) (lnwire.MilliSatoshi, bool) {
+	b, ok := p.bandwidthHints[c]
+	return b, ok
+}
+
+var _ MissionControl = (*missionControl)(nil)
+var _ PaymentSession = (*staticPaymentSession)(nil)
