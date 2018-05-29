@@ -8,7 +8,6 @@ import (
 
 	"container/heap"
 
-	"github.com/coreos/bbolt"
 	"github.com/lightningnetwork/lightning-onion"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnwire"
@@ -458,21 +457,10 @@ func edgeWeight(amt lnwire.MilliSatoshi, e *channeldb.ChannelEdgePolicy) int64 {
 // time-lock+fee costs along a particular edge. If a path is found, this
 // function returns a slice of ChannelHop structs which encoded the chosen path
 // from the target to the source.
-func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
-	additionalEdges map[Vertex][]*channeldb.ChannelEdgePolicy,
+func findPath(r PaymentSession,
 	sourceNode *channeldb.LightningNode, target *btcec.PublicKey,
 	ignoredNodes map[Vertex]struct{}, ignoredEdges map[uint64]struct{},
-	amt lnwire.MilliSatoshi,
-	bandwidthHints map[uint64]lnwire.MilliSatoshi) ([]*ChannelHop, error) {
-
-	var err error
-	if tx == nil {
-		tx, err = graph.Database().Begin(false)
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
-	}
+	amt lnwire.MilliSatoshi) ([]*ChannelHop, error) {
 
 	// First we'll initialize an empty heap which'll help us to quickly
 	// locate the next edge we should visit next during our graph
@@ -482,7 +470,7 @@ func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 	// For each node in the graph, we create an entry in the distance
 	// map for the node set with a distance of "infinity".
 	distance := make(map[Vertex]nodeWithDist)
-	if err := graph.ForEachNode(tx, func(_ *bolt.Tx, node *channeldb.LightningNode) error {
+	if err := r.ForEachNode(func(node *channeldb.LightningNode) error {
 		// TODO(roasbeef): with larger graph can just use disk seeks
 		// with a visited map
 		distance[Vertex(node.PubKeyBytes)] = nodeWithDist{
@@ -492,16 +480,6 @@ func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 		return nil
 	}); err != nil {
 		return nil, err
-	}
-
-	// We'll also include all the nodes found within the additional edges
-	// that are not known to us yet in the distance map.
-	for vertex := range additionalEdges {
-		node := &channeldb.LightningNode{PubKeyBytes: vertex}
-		distance[vertex] = nodeWithDist{
-			dist: infinity,
-			node: node,
-		}
 	}
 
 	// We can't always assume that the end destination is publicly
@@ -538,6 +516,18 @@ func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 			return
 		}
 		if _, ok := ignoredEdges[edge.ChannelID]; ok {
+			return
+		}
+
+		// If this vertex or edge has been black listed, then we'll skip
+		// exploring this edge.
+		score, err := r.EdgeScore(amt, edge)
+		if err != nil {
+			// TODO: handle error
+			return
+		}
+
+		if score <= 0 {
 			return
 		}
 
@@ -607,24 +597,15 @@ func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 		// examine all the outgoing edge (channels) from this node to
 		// further our graph traversal.
 		pivot := Vertex(bestNode.PubKeyBytes)
-		err := bestNode.ForEachChannel(tx, func(tx *bolt.Tx,
-			edgeInfo *channeldb.ChannelEdgeInfo,
-			outEdge, _ *channeldb.ChannelEdgePolicy) error {
+		bestNodeKey, err := bestNode.PubKey()
+		if err != nil {
+			return nil, err
+		}
+		err = r.ForEachChannel(bestNodeKey, func(
+			outEdge *channeldb.ChannelEdgePolicy,
+			bandwidth lnwire.MilliSatoshi) error {
 
-			// We'll query the lower layer to see if we can obtain
-			// any more up to date information concerning the
-			// bandwidth of this edge.
-			edgeBandwidth, ok := bandwidthHints[edgeInfo.ChannelID]
-			if !ok {
-				// If we don't have a hint for this edge, then
-				// we'll just use the known Capacity as the
-				// available bandwidth.
-				edgeBandwidth = lnwire.NewMSatFromSatoshis(
-					edgeInfo.Capacity,
-				)
-			}
-
-			processEdge(outEdge, edgeBandwidth, pivot)
+			processEdge(outEdge, bandwidth, pivot)
 
 			// TODO(roasbeef): return min HTLC as error in end?
 
@@ -632,15 +613,6 @@ func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 		})
 		if err != nil {
 			return nil, err
-		}
-
-		// Then, we'll examine all the additional edges from the node
-		// we're currently visiting. Since we don't know the capacity
-		// of the private channel, we'll assume it was selected as a
-		// routing hint due to having enough capacity for the payment
-		// and use the payment amount as its capacity.
-		for _, edge := range additionalEdges[bestNode.PubKeyBytes] {
-			processEdge(edge, amt, pivot)
 		}
 	}
 
@@ -697,10 +669,9 @@ func findPath(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 // make our inner path finding algorithm aware of our k-shortest paths
 // algorithm, rather than attempting to use an unmodified path finding
 // algorithm in a block box manner.
-func findPaths(tx *bolt.Tx, graph *channeldb.ChannelGraph,
+func findPaths(r PaymentSession,
 	source *channeldb.LightningNode, target *btcec.PublicKey,
-	amt lnwire.MilliSatoshi, numPaths uint32,
-	bandwidthHints map[uint64]lnwire.MilliSatoshi) ([][]*ChannelHop, error) {
+	amt lnwire.MilliSatoshi, numPaths uint32) ([][]*ChannelHop, error) {
 
 	ignoredEdges := make(map[uint64]struct{})
 	ignoredVertexes := make(map[Vertex]struct{})
@@ -715,9 +686,9 @@ func findPaths(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 	// First we'll find a single shortest path from the source (our
 	// selfNode) to the target destination that's capable of carrying amt
 	// satoshis along the path before fees are calculated.
-	startingPath, err := findPath(
-		tx, graph, nil, source, target, ignoredVertexes, ignoredEdges,
-		amt, bandwidthHints,
+	startingPath, err := findPath(r,
+		source, target, ignoredVertexes, ignoredEdges,
+		amt,
 	)
 	if err != nil {
 		log.Errorf("Unable to find path: %v", err)
@@ -789,10 +760,9 @@ func findPaths(tx *bolt.Tx, graph *channeldb.ChannelGraph,
 			// the Vertexes (other than the spur path) within the
 			// root path removed, we'll attempt to find another
 			// shortest path from the spur node to the destination.
-			spurPath, err := findPath(
-				tx, graph, nil, spurNode, target,
+			spurPath, err := findPath(r,
+				spurNode, target,
 				ignoredVertexes, ignoredEdges, amt,
-				bandwidthHints,
 			)
 
 			// If we weren't able to find a path, we'll continue to
