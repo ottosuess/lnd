@@ -314,12 +314,24 @@ func TestBasicGraphPathFinding(t *testing.T) {
 		startingHeight = 100
 		finalHopCLTV   = 1
 	)
-
 	paymentAmt := lnwire.NewMSatFromSatoshis(100)
 	target := aliases["sophon"]
-	path, err := findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, paymentAmt, nil,
+
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, paymentAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+
+	path, err := findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, paymentAmt,
 	)
 	if err != nil {
 		t.Fatalf("unable to find path: %v", err)
@@ -462,9 +474,10 @@ func TestBasicGraphPathFinding(t *testing.T) {
 	// exist two possible paths in the graph, but the shorter (1 hop) path
 	// should be selected.
 	target = aliases["luoji"]
-	path, err = findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, paymentAmt, nil,
+
+	path, err = findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, paymentAmt,
 	)
 	if err != nil {
 		t.Fatalf("unable to find route: %v", err)
@@ -538,22 +551,37 @@ func TestPathFindingWithAdditionalEdges(t *testing.T) {
 
 	// Create the channel edge going from songoku to doge and include it in
 	// our map of additional edges.
-	songokuToDoge := &channeldb.ChannelEdgePolicy{
-		Node:                      doge,
-		ChannelID:                 1337,
-		FeeBaseMSat:               1,
-		FeeProportionalMillionths: 1000,
-		TimeLockDelta:             9,
+	songokuToDoge := addEdge{
+		edge: &channeldb.ChannelEdgePolicy{
+			Node:                      doge,
+			ChannelID:                 1337,
+			FeeBaseMSat:               1,
+			FeeProportionalMillionths: 1000,
+			TimeLockDelta:             9,
+		},
+		capacity: paymentAmt,
 	}
 
-	additionalEdges := map[Vertex][]*channeldb.ChannelEdgePolicy{
+	additionalEdges := map[Vertex][]addEdge{
 		NewVertex(aliases["songoku"]): {songokuToDoge},
 	}
 
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(additionalEdges, paymentAmt, dogePubKey)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+
 	// We should now be able to find a path from roasbeef to doge.
-	path, err := findPath(
-		nil, graph, additionalEdges, sourceNode, dogePubKey, nil, nil,
-		paymentAmt, nil,
+	path, err := findPath(r,
+		sourceNode, dogePubKey, nil, nil,
+		paymentAmt,
 	)
 	if err != nil {
 		t.Fatalf("unable to find private path to doge: %v", err)
@@ -588,9 +616,21 @@ func TestKShortestPathFinding(t *testing.T) {
 
 	paymentAmt := lnwire.NewMSatFromSatoshis(100)
 	target := aliases["luoji"]
-	paths, err := findPaths(
-		nil, graph, sourceNode, target, paymentAmt, 100,
-		nil,
+
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, paymentAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+
+	paths, err := findPaths(r,
+		sourceNode, target, paymentAmt, 100,
 	)
 	if err != nil {
 		t.Fatalf("unable to find paths between roasbeef and "+
@@ -640,9 +680,22 @@ func TestNewRoutePathTooLong(t *testing.T) {
 	// We start by confirming that routing a payment 20 hops away is possible.
 	// Alice should be able to find a valid route to ursula.
 	target := aliases["ursula"]
-	_, err = findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, paymentAmt, nil,
+
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, paymentAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+
+	_, err = findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, paymentAmt,
 	)
 	if err != nil {
 		t.Fatalf("path should have been found")
@@ -651,9 +704,14 @@ func TestNewRoutePathTooLong(t *testing.T) {
 	// Vincent is 21 hops away from Alice, and thus no valid route should be
 	// presented to Alice.
 	target = aliases["vincent"]
-	path, err := findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, paymentAmt, nil,
+	r, err = mc.NewPaymentSession(nil, paymentAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+
+	path, err := findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, paymentAmt,
 	)
 	if err == nil {
 		t.Fatalf("should not have been able to find path, supposed to be "+
@@ -692,10 +750,20 @@ func TestPathNotAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to parse pubkey: %v", err)
 	}
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
 
-	_, err = findPath(
-		nil, graph, nil, sourceNode, unknownNode, ignoredVertexes,
-		ignoredEdges, 100, nil,
+	r, err := mc.NewPaymentSession(nil, 100, unknownNode)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+	_, err = findPath(r,
+		sourceNode, unknownNode, ignoredVertexes,
+		ignoredEdges, 100,
 	)
 	if !IsError(err, ErrNoPathFound) {
 		t.Fatalf("path shouldn't have been found: %v", err)
@@ -715,6 +783,7 @@ func TestPathInsufficientCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to fetch source node: %v", err)
 	}
+
 	ignoredEdges := make(map[uint64]struct{})
 	ignoredVertexes := make(map[Vertex]struct{})
 
@@ -727,11 +796,23 @@ func TestPathInsufficientCapacity(t *testing.T) {
 	// satoshis, so we shouldn't be able to find a path to sophon even
 	// though we have a 2-hop link.
 	target := aliases["sophon"]
-
 	payAmt := lnwire.NewMSatFromSatoshis(btcutil.SatoshiPerBitcoin)
-	_, err = findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, payAmt, nil,
+
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, payAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+
+	_, err = findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, payAmt,
 	)
 	if !IsError(err, ErrNoPathFound) {
 		t.Fatalf("graph shouldn't be able to support payment: %v", err)
@@ -753,6 +834,7 @@ func TestRouteFailMinHTLC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to fetch source node: %v", err)
 	}
+
 	ignoredEdges := make(map[uint64]struct{})
 	ignoredVertexes := make(map[Vertex]struct{})
 
@@ -761,9 +843,20 @@ func TestRouteFailMinHTLC(t *testing.T) {
 	// attempt should fail.
 	target := aliases["songoku"]
 	payAmt := lnwire.MilliSatoshi(10)
-	_, err = findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, payAmt, nil,
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, payAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+	_, err = findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, payAmt,
 	)
 	if !IsError(err, ErrNoPathFound) {
 		t.Fatalf("graph shouldn't be able to support payment: %v", err)
@@ -786,6 +879,7 @@ func TestRouteFailDisabledEdge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to fetch source node: %v", err)
 	}
+
 	ignoredEdges := make(map[uint64]struct{})
 	ignoredVertexes := make(map[Vertex]struct{})
 
@@ -793,9 +887,20 @@ func TestRouteFailDisabledEdge(t *testing.T) {
 	// succeed without issue, and return a single path.
 	target := aliases["songoku"]
 	payAmt := lnwire.NewMSatFromSatoshis(10000)
-	_, err = findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, payAmt, nil,
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, payAmt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+	_, err = findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, payAmt,
 	)
 	if err != nil {
 		t.Fatalf("unable to find path: %v", err)
@@ -814,9 +919,9 @@ func TestRouteFailDisabledEdge(t *testing.T) {
 
 	// Now, if we attempt to route through that edge, we should get a
 	// failure as it is no longer eligible.
-	_, err = findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertexes,
-		ignoredEdges, payAmt, nil,
+	_, err = findPath(r,
+		sourceNode, target, ignoredVertexes,
+		ignoredEdges, payAmt,
 	)
 	if !IsError(err, ErrNoPathFound) {
 		t.Fatalf("graph shouldn't be able to support payment: %v", err)
@@ -845,9 +950,20 @@ func TestRouteExceededFeeLimit(t *testing.T) {
 	// Find a path to send 100 satoshis from roasbeef to sophon.
 	target := aliases["sophon"]
 	amt := lnwire.NewMSatFromSatoshis(100)
-	path, err := findPath(
-		nil, graph, nil, sourceNode, target, ignoredVertices,
-		ignoredEdges, amt, nil,
+	mc := newMissionControl(
+		graph, sourceNode,
+		func(edge *channeldb.ChannelEdgeInfo) lnwire.MilliSatoshi {
+			return lnwire.NewMSatFromSatoshis(edge.Capacity)
+		},
+	)
+
+	r, err := mc.NewPaymentSession(nil, amt, target)
+	if err != nil {
+		t.Fatalf("unable to create session: %v", err)
+	}
+	path, err := findPath(r,
+		sourceNode, target, ignoredVertices,
+		ignoredEdges, amt,
 	)
 	if err != nil {
 		t.Fatalf("unable to find path from roasbeef to phamnuwen for "+
