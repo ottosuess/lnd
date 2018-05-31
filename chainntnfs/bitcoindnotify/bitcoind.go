@@ -548,7 +548,7 @@ type spendCancel struct {
 // across the 'Spend' channel. The heightHint should represent the earliest
 // height in the chain where the transaction could have been spent in.
 func (b *BitcoindNotifier) RegisterSpendNtfn(outpoint *wire.OutPoint,
-	heightHint uint32, _ bool) (*chainntnfs.SpendEvent, error) {
+	heightHint uint32) (*chainntnfs.SpendEvent, error) {
 
 	ntfn := &spendNotification{
 		targetOutpoint: outpoint,
