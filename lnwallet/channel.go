@@ -3172,8 +3172,6 @@ func (lc *LightningChannel) ProcessChanSyncMsg(
 		}
 	}
 
-	// TODO(roasbeef): check validity of commitment point after the fact
-
 	// Take note of our current commit chain heights before we begin adding
 	// more to them.
 	var (
@@ -3385,6 +3383,37 @@ func (lc *LightningChannel) ProcessChanSyncMsg(
 			return nil, nil, nil, err
 		}
 		return nil, nil, nil, ErrCannotSyncCommitChains
+	}
+
+	// If we didn't have recovery options, then the final check cannot be
+	// performed, and we'll return early.
+	if !hasRecoveryOptions {
+		return updates, openedCircuits, closedCircuits, nil
+	}
+
+	// At this point we have determined that either the commit heights are
+	// in sync, or that we are in a state we can recover from. As a final
+	// check, we ensure that the commitment point sent to us by the remote
+	// is valid.
+	var commitPoint *btcec.PublicKey
+	switch {
+	case msg.NextLocalCommitHeight == remoteTailHeight+2:
+		commitPoint = lc.channelState.RemoteNextRevocation
+
+	case msg.NextLocalCommitHeight == remoteTailHeight+1:
+		commitPoint = lc.channelState.RemoteCurrentRevocation
+	}
+	if commitPoint != nil &&
+		!commitPoint.IsEqual(msg.LocalUnrevokedCommitPoint) {
+		walletLog.Errorf("ChannelPoint(%v), sync failed: remote "+
+			"sent invalid commit point for height %v!",
+			msg.NextLocalCommitHeight)
+
+		if err := lc.channelState.MarkBorked(); err != nil {
+			return nil, nil, nil, err
+		}
+		// TODO(halseth): force close?
+		return nil, nil, nil, ErrInvalidLocalUnrevokedCommitPoint
 	}
 
 	return updates, openedCircuits, closedCircuits, nil
