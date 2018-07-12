@@ -1484,7 +1484,8 @@ func newSingleLinkTestHarness(chanAmt, chanReserve btcutil.Amount) (
 		},
 		FetchLastChannelUpdate: mockGetChanUpdateMessage,
 		PreimageCache:          pCache,
-		OnChannelFailure: func(lnwire.ChannelID, lnwire.ShortChannelID, LinkFailureError) {
+		OnChannelFailure: func(lnwire.ChannelID,
+			lnwire.ShortChannelID, LinkFailureError) {
 		},
 		UpdateContractSignals: func(*contractcourt.ContractSignals) error {
 			return nil
@@ -3874,6 +3875,9 @@ func restartLink(aliceChannel *lnwallet.LightningChannel, aliceSwitch *Switch,
 		},
 		FetchLastChannelUpdate: mockGetChanUpdateMessage,
 		PreimageCache:          pCache,
+		OnChannelFailure: func(lnwire.ChannelID,
+			lnwire.ShortChannelID, LinkFailureError) {
+		},
 		UpdateContractSignals: func(*contractcourt.ContractSignals) error {
 			return nil
 		},
