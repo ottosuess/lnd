@@ -9,6 +9,7 @@ import (
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnwallet"
+	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
@@ -350,7 +351,8 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 		// as necessary.
 		case broadcastStateNum == remoteStateNum:
 			err := c.dispatchRemoteForceClose(
-				commitSpend, *remoteCommit, false,
+				commitSpend, *remoteCommit,
+				c.cfg.chanState.RemoteCurrentRevocation,
 			)
 			if err != nil {
 				log.Errorf("unable to handle remote "+
@@ -369,7 +371,7 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 
 			err := c.dispatchRemoteForceClose(
 				commitSpend, remoteChainTip.Commitment,
-				true,
+				c.cfg.chanState.RemoteNextRevocation,
 			)
 			if err != nil {
 				log.Errorf("unable to handle remote "+
@@ -573,12 +575,19 @@ func (c *chainWatcher) dispatchLocalForceClose(
 // the remote party. This function will prepare a UnilateralCloseSummary which
 // will then be sent to any subscribers allowing them to resolve all our funds
 // in the channel on chain. Once this close summary is prepared, all registered
-// subscribers will receive a notification of this event. The
-// isRemotePendingCommit argument should be set to true if the remote node
-// broadcast their pending commitment (w/o revoking their current settled
-// commitment).
-func (c *chainWatcher) dispatchRemoteForceClose(commitSpend *chainntnfs.SpendDetail,
-	remoteCommit channeldb.ChannelCommitment, isRemotePendingCommit bool) error {
+// subscribers will receive a notification of this event. The commitPoint
+// argument should be set to the per_commitment_point corresponding to the
+// spending commitment.
+//
+// NOTE: The remoteCommit argument should be set to the stored commitment for
+// this particular state. If we don't have the commitment stored (should only
+// happen in case we have lost state) it should be set to an empty struct, in
+// which case we will attempt to sweep the non-HTLC output using the passed
+// commitPoint.
+func (c *chainWatcher) dispatchRemoteForceClose(
+	commitSpend *chainntnfs.SpendDetail,
+	remoteCommit channeldb.ChannelCommitment,
+	commitPoint *btcec.PublicKey) error {
 
 	log.Infof("Unilateral close of ChannelPoint(%v) "+
 		"detected", c.cfg.chanState.FundingOutpoint)
@@ -588,7 +597,7 @@ func (c *chainWatcher) dispatchRemoteForceClose(commitSpend *chainntnfs.SpendDet
 	// channel on-chain.
 	uniClose, err := lnwallet.NewUnilateralCloseSummary(
 		c.cfg.chanState, c.cfg.signer, c.cfg.pCache, commitSpend,
-		remoteCommit, isRemotePendingCommit,
+		remoteCommit, commitPoint,
 	)
 	if err != nil {
 		return err
