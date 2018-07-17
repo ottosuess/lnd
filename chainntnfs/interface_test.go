@@ -472,7 +472,7 @@ func testSpendNotification(miner *rpctest.Harness,
 	case <-spentIntent.Spend:
 		t.Fatalf("did not expect to get notification before " +
 			"block was mined")
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(mempoolSpendTimeout):
 	}
 	spendClients = append(spendClients, spentIntent)
 
