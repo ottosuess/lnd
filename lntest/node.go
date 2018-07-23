@@ -20,13 +20,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	macaroon "gopkg.in/macaroon.v2"
 
-	"github.com/go-errors/errors"
-	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/lightningnetwork/lnd/macaroons"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/go-errors/errors"
+	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/lightningnetwork/lnd/macaroons"
 )
 
 var (
@@ -165,7 +165,6 @@ func (cfg nodeConfig) genArgs() []string {
 	args = append(args, fmt.Sprintf("--adminmacaroonpath=%v", cfg.AdminMacPath))
 	args = append(args, fmt.Sprintf("--readonlymacaroonpath=%v", cfg.ReadMacPath))
 	args = append(args, fmt.Sprintf("--invoicemacaroonpath=%v", cfg.InvoiceMacPath))
-	args = append(args, fmt.Sprintf("--externalip=%s", cfg.P2PAddr()))
 	args = append(args, fmt.Sprintf("--trickledelay=%v", trickleDelay))
 
 	if !cfg.HasSeed {
