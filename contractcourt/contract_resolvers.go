@@ -8,12 +8,12 @@ import (
 	"io"
 	"io/ioutil"
 
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 )
 
 var (
@@ -822,7 +822,7 @@ func (h *htlcOutgoingContestResolver) Resolve() (ContractResolver, error) {
 	if err != nil {
 		return nil, err
 	}
-	if uint32(currentHeight) >= h.htlcResolution.Expiry {
+	if uint32(currentHeight) >= h.htlcResolution.Expiry-1 {
 		log.Infof("%T(%v): HTLC has expired (height=%v, expiry=%v), "+
 			"transforming into timeout resolver", h,
 			h.htlcResolution.ClaimOutpoint)
