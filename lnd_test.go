@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	harnessNetParams = &chaincfg.SimNetParams
+	harnessNetParams = &chaincfg.RegressionNetParams
 )
 
 const (
@@ -10922,7 +10922,7 @@ func TestLightningNetworkDaemon(t *testing.T) {
 
 	// Next mine enough blocks in order for segwit and the CSV package
 	// soft-fork to activate on SimNet.
-	numBlocks := chaincfg.SimNetParams.MinerConfirmationWindow * 2
+	numBlocks := chaincfg.RegressionNetParams.MinerConfirmationWindow * 2
 	if _, err := miner.Node.Generate(numBlocks); err != nil {
 		ht.Fatalf("unable to generate blocks: %v", err)
 	}
