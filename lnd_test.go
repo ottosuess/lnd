@@ -216,15 +216,10 @@ func closeChannelAndAssert(ctx context.Context, t *harnessTest,
 		t.Fatalf("unable to close channel: %v", err)
 	}
 
-	txidHash, err := getChanPointFundingTxid(fundingChanPoint)
+	chanPointStr, err := chanPointStr(fundingChanPoint)
 	if err != nil {
-		t.Fatalf("unable to get txid: %v", err)
+		t.Fatalf("unable to convert chanpoint to string: %v", err)
 	}
-	txid, err := chainhash.NewHash(txidHash)
-	if err != nil {
-		t.Fatalf("unable to convert to chainhash: %v", err)
-	}
-	chanPointStr := fmt.Sprintf("%v:%v", txid, fundingChanPoint.OutputIndex)
 
 	// If we didn't force close the transaction, at this point, the channel
 	// should now be marked as being in the state of "waiting close".
@@ -291,6 +286,23 @@ func closeChannelAndAssert(ctx context.Context, t *harnessTest,
 	}
 
 	return closingTxid
+}
+
+// chanPointToStr converts tha passed channel point to a string
+// representation matching what is used in lnrpc.
+func chanPointStr(chanPoint *lnrpc.ChannelPoint) (string, error) {
+	txidHash, err := getChanPointFundingTxid(chanPoint)
+	if err != nil {
+		return "", err
+	}
+
+	txid, err := chainhash.NewHash(txidHash)
+	if err != nil {
+		return "", err
+	}
+
+	str := fmt.Sprintf("%v:%v", txid, chanPoint.OutputIndex)
+	return str, nil
 }
 
 // numOpenChannelsPending sends an RPC request to a node to get a count of the
