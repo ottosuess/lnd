@@ -10764,28 +10764,18 @@ func TestLightningNetworkDaemon(t *testing.T) {
 		},
 	}
 
-	// Now create a new rpctest.harness that will act as our backend node.
-	// Add an argument to ensure we are connecting the chain backend to the
-	// miner.
-	args := []string{"--rejectnonstd"}
-	chainBackend, err := rpctest.New(harnessNetParams, handlers, args)
+	//	bd, cleanUp, err := lntest.NewBitcoindBackend()
+	//	if err != nil {
+	//		ht.Fatalf("unable to start bitcoind: %v", err)
+	//	}
+	//	defer cleanUp()
+
+	bd, cleanUp, err := lntest.NewBtcdBackend()
 	if err != nil {
-		ht.Fatalf("unable to create mining node: %v", err)
+		ht.Fatalf("unable to start btcd: %v", err)
 	}
-	defer chainBackend.TearDown()
+	defer cleanUp()
 
-	if err := chainBackend.SetUp(false, 0); err != nil {
-		ht.Fatalf("unable to set up chain backend: %v", err)
-	}
-
-	if err := chainBackend.Node.NotifyNewTransactions(false); err != nil {
-		ht.Fatalf("unable to request transaction notifications: %v", err)
-	}
-
-	bd := lntest.BtcdBackendConfig{
-		RPCConfig: chainBackend.RPCConfig(),
-		Harness:   chainBackend,
-	}
 	// Create an instance of the btcd's rpctest.Harness that will act as
 	// the miner for all tests. This will be used to fund the wallets of
 	// the nodes within the test network and to drive blockchain related
@@ -10793,14 +10783,13 @@ func TestLightningNetworkDaemon(t *testing.T) {
 	// non-standard transactions on simnet to reject them. Transactions on
 	// the lightning network should always be standard to get better
 	// guarantees of getting included in to blocks.
-	extraArgs := append(
-		args, fmt.Sprintf("--connect=%v", bd.P2PAddr()),
-	)
-	miner, err := rpctest.New(harnessNetParams, nil, extraArgs)
+	args := []string{"--rejectnonstd", "--debuglevel=debug"}
+	minerArgs := append(args, fmt.Sprintf("--connect=%v", bd.P2PAddr()))
+	miner, err := rpctest.New(harnessNetParams, handlers, minerArgs)
 	if err != nil {
 		ht.Fatalf("unable to create mining node: %v", err)
 	}
-	defer miner.TearDown()
+	//defer miner.TearDown()
 
 	if err := miner.SetUp(true, 50); err != nil {
 		ht.Fatalf("unable to set up mining node: %v", err)
@@ -10844,7 +10833,10 @@ func TestLightningNetworkDaemon(t *testing.T) {
 	// initialization of the network. args - list of lnd arguments,
 	// example: "--debuglevel=debug"
 	// TODO(roasbeef): create master balanced channel with all the monies?
-	if err = lndHarness.SetUp(nil); err != nil {
+	var lndArgs []string
+	//	lndArgs = append(lndArgs, "--bitcoin.node=neutrino", "--debuglevel=trace")
+	//	lndArgs = append(lndArgs, fmt.Sprintf("--neutrino.connect=%v", miner.P2PAddress()))
+	if err = lndHarness.SetUp(lndArgs); err != nil {
 		ht.Fatalf("unable to set up test lightning network: %v", err)
 	}
 
