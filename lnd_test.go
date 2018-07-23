@@ -476,7 +476,7 @@ const (
 // performs multiple restorations using the same seed and various recovery
 // windows to ensure we detect funds properly.
 func testOnchainFundRecovery(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	// First, create a new node with strong passphrase and grab the mnemonic
@@ -639,7 +639,7 @@ func testOnchainFundRecovery(net *lntest.NetworkHarness, t *harnessTest) {
 // conditions. Finally, the chain itself is checked to ensure the closing
 // transaction was mined.
 func testBasicChannelFunding(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	chanAmt := maxBtcFundingAmount
@@ -825,7 +825,7 @@ func checkChannelPolicy(policy, expectedPolicy *lnrpc.RoutingPolicy) error {
 // testUpdateChannelPolicy tests that policy updates made to a channel
 // gets propagated to other nodes in the network.
 func testUpdateChannelPolicy(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	// Launch notification clients for all nodes, such that we can
@@ -1045,8 +1045,10 @@ func testUpdateChannelPolicy(net *lntest.NetworkHarness, t *harnessTest) {
 // channel where the funding tx gets reorged out, the channel will no
 // longer be present in the node's routing table.
 func testOpenChannelAfterReorg(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 5)
-	ctxb := context.Background()
+	var (
+		timeout = time.Duration(time.Second * 20)
+		ctxb    = context.Background()
+	)
 
 	// Set up a new miner that we can use to cause a reorg.
 	args := []string{"--rejectnonstd"}
@@ -1244,7 +1246,7 @@ func testDisconnectingTargetPeer(net *lntest.NetworkHarness, t *harnessTest) {
 	chanAmt := maxBtcFundingAmount
 	pushAmt := btcutil.Amount(0)
 
-	timeout := time.Duration(time.Second * 10)
+	timeout := time.Duration(time.Second * 20)
 	ctxt, _ := context.WithTimeout(ctxb, timeout)
 
 	// Create a new channel that requires 1 confs before it's considered
@@ -1386,7 +1388,7 @@ func testChannelFundingPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	chanAmt := maxBtcFundingAmount
 	pushAmt := btcutil.Amount(0)
 
-	timeout := time.Duration(time.Second * 10)
+	timeout := time.Duration(time.Second * 20)
 
 	// As we need to create a channel that requires more than 1
 	// confirmation before it's open, with the current set of defaults,
@@ -1512,7 +1514,7 @@ func testChannelFundingPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 // testChannelBalance creates a new channel between Alice and  Bob, then
 // checks channel balance to be equal amount specified while creation of channel.
 func testChannelBalance(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 
 	// Open a channel with 0.16 BTC between Alice and Bob, ensuring the
 	// channel has been opened properly.
@@ -1708,7 +1710,7 @@ func assertPendingHtlcStageAndMaturity(t *harnessTest,
 func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
 	const (
-		timeout     = time.Duration(time.Second * 10)
+		timeout     = time.Duration(time.Second * 20)
 		chanAmt     = btcutil.Amount(10e6)
 		pushAmt     = btcutil.Amount(5e6)
 		paymentAmt  = 100000
@@ -1995,7 +1997,7 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// At this point, the sweeping transaction should now be broadcast. So
 	// we fetch the node's mempool to ensure it has been properly
 	// broadcast.
-	sweepingTXID, err := waitForTxInMempool(net.Miner.Node, 3*time.Second)
+	sweepingTXID, err := waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("failed to get sweep tx from mempool: %v", err)
 	}
@@ -2109,7 +2111,7 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// closing, we expect Alice to broadcast an htlc timeout txn for each
 	// one. Wait for them all to show up in the mempool.
 	htlcTxIDs, err := waitForNTxsInMempool(net.Miner.Node, numInvoices,
-		10*time.Second)
+		20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find htlc timeout txns in mempool: %v", err)
 	}
@@ -2202,7 +2204,7 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 
 	// Wait for the single sweep txn to appear in the mempool.
-	htlcSweepTxID, err := waitForTxInMempool(net.Miner.Node, 15*time.Second)
+	htlcSweepTxID, err := waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("failed to get sweep tx from mempool: %v", err)
 	}
@@ -2313,7 +2315,7 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 // expect for replayed onion packets.
 func testSphinxReplayPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 
 	// Open a channel with 100k satoshis between Carol and Dave with Carol being
 	// the sole funder of the channel.
@@ -2480,7 +2482,7 @@ func testSphinxReplayPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 
 func testSingleHopInvoice(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice being
 	// the sole funder of the channel.
@@ -2618,7 +2620,7 @@ func testSingleHopInvoice(net *lntest.NetworkHarness, t *harnessTest) {
 
 func testListPayments(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 
 	// First start by deleting all payments that Alice knows of. This will
 	// allow us to execute the test with a clean state for Alice.
@@ -2823,7 +2825,7 @@ func updateChannelPolicy(t *harnessTest, node *lntest.HarnessNode,
 	timeLockDelta uint32, listenerNode *lntest.HarnessNode) {
 
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 
 	expectedPolicy := &lnrpc.RoutingPolicy{
 		FeeBaseMsat:      baseFee,
@@ -3142,7 +3144,7 @@ func testMultiHopPayments(net *lntest.NetworkHarness, t *harnessTest) {
 func testSingleHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(100000)
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
@@ -3289,7 +3291,7 @@ func testSingleHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(100000)
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
@@ -3478,7 +3480,7 @@ func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 func testSendToRouteErrorPropagation(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(100000)
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
 	// being the sole funder of the channel.
@@ -3597,7 +3599,7 @@ func testSendToRouteErrorPropagation(net *lntest.NetworkHarness, t *harnessTest)
 func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(100000)
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// We create the following topology:
@@ -3936,7 +3938,7 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 // created properly.
 func testInvoiceRoutingHints(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
-	timeout := time.Duration(15 * time.Second)
+	timeout := time.Duration(20 * time.Second)
 	const chanAmt = btcutil.Amount(100000)
 
 	// Throughout this test, we'll be opening a channel betwen Alice and
@@ -4113,7 +4115,7 @@ func testMultiHopOverPrivateChannels(net *lntest.NetworkHarness, t *harnessTest)
 	// Alice <--100k--> Bob <--100k--> Carol <--100k--> Dave
 
 	ctxb := context.Background()
-	timeout := time.Duration(15 * time.Second)
+	timeout := time.Duration(20 * time.Second)
 	const chanAmt = btcutil.Amount(100000)
 
 	// First, we'll open a private channel between Alice and Bob with Alice
@@ -4321,7 +4323,7 @@ func testMultiHopOverPrivateChannels(net *lntest.NetworkHarness, t *harnessTest)
 func testInvoiceSubscriptions(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(500000)
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 
 	// Open a channel with 500k satoshis between Alice and Bob with Alice
 	// being the sole funder of the channel.
@@ -4556,7 +4558,7 @@ func testInvoiceSubscriptions(net *lntest.NetworkHarness, t *harnessTest) {
 func testBasicChannelCreation(net *lntest.NetworkHarness, t *harnessTest) {
 	const (
 		numChannels = 2
-		timeout     = time.Duration(time.Second * 5)
+		timeout     = time.Duration(time.Second * 20)
 		amount      = maxBtcFundingAmount
 	)
 
@@ -4585,7 +4587,7 @@ func testMaxPendingChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	maxPendingChannels := defaultMaxPendingChannels + 1
 	amount := maxBtcFundingAmount
 
-	timeout := time.Duration(time.Second * 10)
+	timeout := time.Duration(time.Second * 20)
 	ctx, _ := context.WithTimeout(context.Background(), timeout)
 
 	// Create a new node (Carol) with greater number of max pending
@@ -4906,7 +4908,7 @@ func testFailingChannel(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 
 	// Carol will use the correct preimage to resolve the HTLC on-chain.
-	_, err = waitForTxInMempool(net.Miner.Node, 5*time.Second)
+	_, err = waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Bob's breach tx in mempool: %v", err)
 	}
@@ -4919,7 +4921,7 @@ func testFailingChannel(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 
 	// Wait for the sweeping tx to be broadcast.
-	_, err = waitForTxInMempool(net.Miner.Node, 5*time.Second)
+	_, err = waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Bob's breach tx in mempool: %v", err)
 	}
@@ -4959,7 +4961,7 @@ func testFailingChannel(net *lntest.NetworkHarness, t *harnessTest) {
 func testRevokedCloseRetribution(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
 	const (
-		timeout     = time.Duration(time.Second * 10)
+		timeout     = time.Duration(time.Second * 20)
 		chanAmt     = maxBtcFundingAmount
 		paymentAmt  = 10000
 		numInvoices = 6
@@ -5123,7 +5125,7 @@ func testRevokedCloseRetribution(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// Wait for Bob's breach transaction to show up in the mempool to ensure
 	// that Alice's node has started waiting for confirmations.
-	_, err = waitForTxInMempool(net.Miner.Node, 5*time.Second)
+	_, err = waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Bob's breach tx in mempool: %v", err)
 	}
@@ -5151,7 +5153,7 @@ func testRevokedCloseRetribution(net *lntest.NetworkHarness, t *harnessTest) {
 	// Query the mempool for Alice's justice transaction, this should be
 	// broadcast as Bob's contract breaching transaction gets confirmed
 	// above.
-	justiceTXID, err := waitForTxInMempool(net.Miner.Node, 5*time.Second)
+	justiceTXID, err := waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Alice's justice tx in mempool: %v", err)
 	}
@@ -5392,7 +5394,7 @@ func testRevokedCloseRetributionZeroValueRemoteOutput(net *lntest.NetworkHarness
 	// Query the mempool for Alice's justice transaction, this should be
 	// broadcast as Carol's contract breaching transaction gets confirmed
 	// above.
-	justiceTXID, err := waitForTxInMempool(net.Miner.Node, 15*time.Second)
+	justiceTXID, err := waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Alice's justice tx in mempool: %v",
 			err)
@@ -5903,7 +5905,7 @@ func testHtlcErrorPropagation(net *lntest.NetworkHarness, t *harnessTest) {
 	// In this test we wish to exercise the daemon's correct parsing,
 	// handling, and propagation of errors that occur while processing a
 	// multi-hop payment.
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	const chanAmt = maxBtcFundingAmount
@@ -6239,7 +6241,7 @@ func subscribeGraphNotifications(t *harnessTest, ctxb context.Context,
 
 func testGraphTopologyNotifications(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = maxBtcFundingAmount
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	// Let Alice subscribe to graph notifications.
@@ -6457,7 +6459,7 @@ func testNodeAnnouncement(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("unable to connect bob to carol: %v", err)
 	}
 
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 	ctxt, _ := context.WithTimeout(ctxb, timeout)
 	chanPoint := openChannelAndAssert(
 		ctxt, t, net, net.Bob, dave, 1000000, 0, false,
@@ -6512,7 +6514,7 @@ func testNodeAnnouncement(net *lntest.NetworkHarness, t *harnessTest) {
 }
 
 func testNodeSignVerify(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	chanAmt := maxBtcFundingAmount
@@ -6607,7 +6609,7 @@ func testAsyncPayments(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 
 	const (
-		timeout    = time.Duration(time.Second * 5)
+		timeout    = time.Duration(time.Second * 20)
 		paymentAmt = 100
 	)
 
@@ -6791,7 +6793,7 @@ func testBidirectionalAsyncPayments(net *lntest.NetworkHarness, t *harnessTest) 
 	}
 
 	const (
-		timeout    = time.Duration(time.Second * 5)
+		timeout    = time.Duration(time.Second * 20)
 		paymentAmt = 1000
 	)
 
@@ -7135,7 +7137,7 @@ func createThreeHopHodlNetwork(t *harnessTest,
 	// which will act as the first leg for out multi-hop HTLC.
 	const chanAmt = 1000000
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxt, _ := context.WithTimeout(ctxb, timeout)
 	aliceChanPoint := openChannelAndAssert(
 		ctxt, t, net, net.Alice, net.Bob, chanAmt, 0, false,
@@ -7195,7 +7197,7 @@ func createThreeHopHodlNetwork(t *harnessTest,
 // timeout has been reached, then we should sweep it on-chain, and cancel the
 // HTLC backwards.
 func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
@@ -7311,7 +7313,7 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
-	_, err = waitForTxInMempool(net.Miner.Node, 10*time.Second)
+	_, err = waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find bob's funding output sweep tx: %v", err)
 	}
@@ -7324,7 +7326,7 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// The second layer HTLC timeout transaction should now have been
 	// broadcast on-chain.
-	secondLayerHash, err := waitForTxInMempool(net.Miner.Node, time.Second*10)
+	secondLayerHash, err := waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		t.Fatalf("unable to find bob's second layer transaction")
 	}
@@ -7381,7 +7383,7 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 	if _, err := net.Miner.Node.Generate(4); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
-	_, err = waitForTxInMempool(net.Miner.Node, time.Second*10)
+	_, err = waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		t.Fatalf("unable to find bob's sweeping transaction: %v", err)
 	}
@@ -7425,7 +7427,7 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 // node that sent the outgoing HTLC should extract the preimage from the sweep
 // transaction, and finish settling the HTLC backwards into the route.
 func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	defaultCSV := uint32(4)
@@ -7530,7 +7532,7 @@ func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) 
 	// second level transaction in the mempool, he will extract the
 	// preimage and settle the HTLC back off-chain.
 	secondLevelHashes, err := waitForNTxsInMempool(net.Miner.Node, 2,
-		time.Second*15)
+		time.Second*20)
 	if err != nil {
 		t.Fatalf("transactions not found in mempool: %v", err)
 	}
@@ -7607,7 +7609,7 @@ func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) 
 	}
 
 	// We should have a new transaction in the mempool.
-	_, err = waitForTxInMempool(net.Miner.Node, time.Second*10)
+	_, err = waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		t.Fatalf("unable to find bob's sweeping transaction: %v", err)
 	}
@@ -7650,7 +7652,7 @@ func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) 
 func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 	t *harnessTest) {
 
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
@@ -7746,7 +7748,7 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
-	_, err = waitForTxInMempool(net.Miner.Node, 10*time.Second)
+	_, err = waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find bob's funding output sweep tx: %v", err)
 	}
@@ -7795,7 +7797,7 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 
 	// We should also now find a transaction in the mempool, as Bob should
 	// have broadcast his second layer timeout transaction.
-	timeoutTx, err := waitForTxInMempool(net.Miner.Node, 10*time.Second)
+	timeoutTx, err := waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find bob's htlc timeout tx: %v", err)
 	}
@@ -7858,7 +7860,7 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 		t.Fatalf("unable to mine blocks: %v", err)
 	}
 
-	sweepTx, err := waitForTxInMempool(net.Miner.Node, 10*time.Second)
+	sweepTx, err := waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find bob's htlc sweep tx: %v", err)
 	}
@@ -7903,7 +7905,7 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 	t *harnessTest) {
 
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
@@ -7992,7 +7994,7 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
-	_, err = waitForTxInMempool(net.Miner.Node, 10*time.Second)
+	_, err = waitForTxInMempool(net.Miner.Node, 20*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find bob's funding output sweep tx: %v", err)
 	}
@@ -8043,7 +8045,7 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 
 	// Bob's sweeping transaction should now be found in the mempool at
 	// this point.
-	sweepTx, err := waitForTxInMempool(net.Miner.Node, time.Second*10)
+	sweepTx, err := waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		// If Bob's transaction isn't yet in the mempool, then due to
 		// internal message passing and the low period between blocks
@@ -8054,7 +8056,7 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 		if _, err := net.Miner.Node.Generate(1); err != nil {
 			t.Fatalf("unable to generate block: %v", err)
 		}
-		sweepTx, err = waitForTxInMempool(net.Miner.Node, time.Second*10)
+		sweepTx, err = waitForTxInMempool(net.Miner.Node, time.Second*20)
 		if err != nil {
 			t.Fatalf("unable to find bob's sweeping transaction: "+
 				"%v", err)
@@ -8113,7 +8115,7 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 // preimage via the witness beacon, we properly settle the HTLC on-chain in
 // order to ensure we don't lose any funds.
 func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	defaultCSV := uint32(4)
@@ -8185,7 +8187,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	}
 
 	// Carol's commitment transaction should now be in the mempool.
-	txids, err := waitForNTxsInMempool(net.Miner.Node, 1, time.Second*15)
+	txids, err := waitForNTxsInMempool(net.Miner.Node, 1, time.Second*20)
 	if err != nil {
 		t.Fatalf("transactions not found in mempool: %v", err)
 	}
@@ -8341,7 +8343,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	}
 	bobSecondLevelCSV -= carolSecondLevelCSV + 1
 
-	carolSweep, err := waitForTxInMempool(net.Miner.Node, time.Second*10)
+	carolSweep, err := waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		t.Fatalf("unable to find Carol's sweeping transaction: %v", err)
 	}
@@ -8352,7 +8354,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	block = mineBlocks(t, net, bobSecondLevelCSV+1)[0]
 	assertTxInBlock(t, block, carolSweep)
 
-	bobSweep, err := waitForTxInMempool(net.Miner.Node, time.Second*10)
+	bobSweep, err := waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		t.Fatalf("unable to find bob's sweeping transaction")
 	}
@@ -8447,7 +8449,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 // we found out the preimage via the witness beacon, we properly settle the
 // HTLC on-chain in order to ensure that we don't lose any funds.
 func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest) {
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
 	defaultCSV := uint32(4)
@@ -8515,7 +8517,7 @@ func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest
 	}
 
 	// Carol's commitment transaction should now be in the mempool.
-	txids, err := waitForNTxsInMempool(net.Miner.Node, 1, time.Second*15)
+	txids, err := waitForNTxsInMempool(net.Miner.Node, 1, time.Second*20)
 	if err != nil {
 		t.Fatalf("transactions not found in mempool: %v", err)
 	}
@@ -8649,7 +8651,7 @@ func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest
 		t.Fatalf("unable to generate block: %v", err)
 	}
 
-	carolSweep, err := waitForTxInMempool(net.Miner.Node, time.Second*10)
+	carolSweep, err := waitForTxInMempool(net.Miner.Node, time.Second*20)
 	if err != nil {
 		t.Fatalf("unable to find Carol's sweeping transaction: %v", err)
 	}
@@ -8696,7 +8698,7 @@ func testSwitchCircuitPersistence(net *lntest.NetworkHarness, t *harnessTest) {
 	const pushAmt = btcutil.Amount(900000)
 
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
@@ -9011,7 +9013,7 @@ func testSwitchOfflineDelivery(net *lntest.NetworkHarness, t *harnessTest) {
 	const pushAmt = btcutil.Amount(900000)
 
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
@@ -9331,7 +9333,7 @@ func testSwitchOfflineDeliveryPersistence(net *lntest.NetworkHarness, t *harness
 	const pushAmt = btcutil.Amount(900000)
 
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
@@ -9657,7 +9659,7 @@ func testSwitchOfflineDeliveryOutgoingOffline(
 	const pushAmt = btcutil.Amount(900000)
 
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel with 100k satoshis between Alice and Bob with Alice
@@ -9930,7 +9932,7 @@ func computeFee(baseFee, feeRate, amt lnwire.MilliSatoshi) lnwire.MilliSatoshi {
 func testQueryRoutes(net *lntest.NetworkHarness, t *harnessTest) {
 	const chanAmt = btcutil.Amount(100000)
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 5)
+	timeout := time.Duration(time.Second * 20)
 	var networkChans []*lnrpc.ChannelPoint
 
 	// Open a channel between Alice and Bob.
@@ -10123,7 +10125,7 @@ func testRouteFeeCutoff(net *lntest.NetworkHarness, t *harnessTest) {
 	// amount and as a fixed amount of satoshis.
 
 	ctxb := context.Background()
-	timeout := time.Duration(time.Second * 15)
+	timeout := time.Duration(time.Second * 20)
 
 	const chanAmt = btcutil.Amount(100000)
 
