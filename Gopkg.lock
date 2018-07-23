@@ -79,7 +79,8 @@
     "txscript",
     "wire"
   ]
-  revision = "86fed781132ac890ee03e906e4ecd5d6fa180c64"
+  revision = "0a798366382b9a275ed2535b2cddb7f2a8bf5a6f"
+  source = "github.com/halseth/btcd"
 
 [[projects]]
   name = "github.com/btcsuite/btclog"
@@ -404,6 +405,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7ac5bd06ab8aa8f6a01f191092ac37d1e33200f366fa3b52fb4152369d76c5be"
+  inputs-digest = "df3488489a47ef2c4bca165c85e4a108696dc68b4192dc6388b7081bbaf52b80"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -68,7 +68,8 @@
 
 [[constraint]]
   name = "github.com/btcsuite/btcd"
-  revision = "86fed781132ac890ee03e906e4ecd5d6fa180c64"
+  revision = "0a798366382b9a275ed2535b2cddb7f2a8bf5a6f"
+  source = "github.com/halseth/btcd"
 
 [[constraint]]
   name = "github.com/btcsuite/btcwallet"
