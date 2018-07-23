@@ -10912,17 +10912,17 @@ func TestLightningNetworkDaemon(t *testing.T) {
 		},
 	}
 
-	//	bd, cleanUp, err := lntest.NewBitcoindBackend()
-	//	if err != nil {
-	//		ht.Fatalf("unable to start bitcoind: %v", err)
-	//	}
-	//	defer cleanUp()
-
-	bd, cleanUp, err := lntest.NewBtcdBackend()
+	bd, cleanUp, err := lntest.NewBitcoindBackend()
 	if err != nil {
-		ht.Fatalf("unable to start btcd: %v", err)
+		ht.Fatalf("unable to start bitcoind: %v", err)
 	}
 	defer cleanUp()
+
+	//	bd, cleanUp, err := lntest.NewBtcdBackend()
+	//	if err != nil {
+	//		ht.Fatalf("unable to start btcd: %v", err)
+	//	}
+	//	defer cleanUp()
 
 	// Create an instance of the btcd's rpctest.Harness that will act as
 	// the miner for all tests. This will be used to fund the wallets of
