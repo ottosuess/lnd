@@ -44,6 +44,7 @@ var (
 
 const (
 	testFeeBase = 1e+6
+	defaultCSV  = 4
 )
 
 // harnessTest wraps a regular testing.T providing enhanced error detection
@@ -7442,8 +7443,6 @@ func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) 
 	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
-	defaultCSV := uint32(4)
-
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
 	// Carol refusing to actually settle or directly cancel any HTLC's
 	// self.
@@ -8130,8 +8129,6 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
-	defaultCSV := uint32(4)
-
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
 	// Carol refusing to actually settle or directly cancel any HTLC's
 	// self.
@@ -8247,7 +8244,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	}
 
 	// Keep track of the second level tx maturity.
-	carolSecondLevelCSV := defaultCSV
+	carolSecondLevelCSV := uint32(defaultCSV)
 
 	// Both Carol's second level transaction and Bob's sweep should be
 	// spending from the commitment transaction.
@@ -8281,7 +8278,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	if err != nil {
 		t.Fatalf("transactions not found in mempool: %v", err)
 	}
-	bobSecondLevelCSV := defaultCSV
+	bobSecondLevelCSV := uint32(defaultCSV)
 
 	// It should spend from the commitment in the channel with Alice.
 	tx, err := net.Miner.Node.GetRawTransaction(bobSecondLvlTx)
@@ -8464,8 +8461,6 @@ func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest
 	timeout := time.Duration(time.Second * 20)
 	ctxb := context.Background()
 
-	defaultCSV := uint32(4)
-
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
 	// Carol refusing to actually settle or directly cancel any HTLC's
 	// self.
@@ -8577,7 +8572,7 @@ func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest
 	}
 
 	// Keep track of the second level tx maturity.
-	carolSecondLevelCSV := defaultCSV
+	carolSecondLevelCSV := uint32(defaultCSV)
 
 	// Both Carol's second level transaction and Bob's sweep should be
 	// spending from the commitment transaction.
