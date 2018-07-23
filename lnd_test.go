@@ -1996,31 +1996,61 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// database update may fail, causing the UTXO nursery to retry the move
 	// operation upon restart. This will change the blockheights from what
 	// is expected by the test.
-	// TODO(bvu): refactor out this sleep.
 	duration := time.Millisecond * 300
-	time.Sleep(duration)
+	var predErr error
+	err = lntest.WaitPredicate(func() bool {
+		// Now that the commitment has been confirmed, the channel
+		// should be marked as force closed.
+		pendingChanResp, err = net.Alice.PendingChannels(
+			ctxb, pendingChansRequest,
+		)
+		if err != nil {
+			predErr = fmt.Errorf("unable to query for pending "+
+				"channels: %v", err)
+			return false
+		}
+		if len(pendingChanResp.PendingForceClosingChannels) != 1 {
+			predErr = fmt.Errorf("expected to find %d force "+
+				"closed channels, got %d", 1,
+				len(pendingChanResp.PendingForceClosingChannels),
+			)
+			return false
+		}
 
-	// Now that the commitment has been confirmed, the channel should be
-	// marked as force closed.
-	pendingChanResp, err = net.Alice.PendingChannels(ctxb, pendingChansRequest)
+		forceClose := findForceClosedChannel(t, pendingChanResp, &op)
+
+		// Now that the channel has been force closed, it should now
+		// have the height and number of blocks to confirm populated.
+		tilMaturity := int32(defaultCSV)
+		if forceClose.MaturityHeight != commCsvMaturityHeight {
+			predErr = fmt.Errorf("expected commitment maturity "+
+				"height to be %d, found %d instead",
+				commCsvMaturityHeight, forceClose.MaturityHeight)
+			return false
+		}
+		if forceClose.BlocksTilMaturity != tilMaturity {
+			predErr = fmt.Errorf("expected commitment blocks til "+
+				"maturity to be %d, found %d instead", tilMaturity,
+				forceClose.BlocksTilMaturity)
+			return false
+		}
+
+		// None of our outputs have been swept, so they should all be
+		// limbo.
+		if forceClose.LimboBalance == 0 {
+			predErr = fmt.Errorf("all funds should still be in " +
+				"limbo")
+			return false
+		}
+		if forceClose.RecoveredBalance != 0 {
+			predErr = fmt.Errorf("no funds should yet be shown " +
+				"as recovered")
+			return false
+		}
+		return true
+	}, time.Second*15)
 	if err != nil {
-		t.Fatalf("unable to query for pending channels: %v", err)
-	}
-	assertNumForceClosedChannels(t, pendingChanResp, 1)
-
-	forceClose := findForceClosedChannel(t, pendingChanResp, &op)
-
-	// Now that the channel has been force closed, it should now have the
-	// height and number of blocks to confirm populated.
-	assertCommitmentMaturity(t, forceClose, commCsvMaturityHeight,
-		int32(defaultCSV))
-
-	// None of our outputs have been swept, so they should all be limbo.
-	if forceClose.LimboBalance == 0 {
-		t.Fatalf("all funds should still be in limbo")
-	}
-	if forceClose.RecoveredBalance != 0 {
-		t.Fatalf("no funds should yet be shown as recovered")
+		t.Fatalf("%v", predErr)
 	}
 
 	// The following restart is intended to ensure that outputs from the
@@ -2060,7 +2090,7 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 	assertNumForceClosedChannels(t, pendingChanResp, 1)
 
-	forceClose = findForceClosedChannel(t, pendingChanResp, &op)
+	forceClose := findForceClosedChannel(t, pendingChanResp, &op)
 
 	// At this point, the nursery should show that the commitment output has
 	// 1 block left before its CSV delay expires. In total, we have mined
