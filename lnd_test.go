@@ -10781,6 +10781,11 @@ func TestLightningNetworkDaemon(t *testing.T) {
 	if err := chainBackend.Node.NotifyNewTransactions(false); err != nil {
 		ht.Fatalf("unable to request transaction notifications: %v", err)
 	}
+
+	bd := lntest.BtcdBackendConfig{
+		RPCConfig: chainBackend.RPCConfig(),
+		Harness:   chainBackend,
+	}
 	// Create an instance of the btcd's rpctest.Harness that will act as
 	// the miner for all tests. This will be used to fund the wallets of
 	// the nodes within the test network and to drive blockchain related
@@ -10806,7 +10811,7 @@ func TestLightningNetworkDaemon(t *testing.T) {
 
 	// Now we can set up our test harness (LND instance), with the chain
 	// backend we just created.
-	lndHarness, err = lntest.NewNetworkHarness(miner, chainBackend)
+	lndHarness, err = lntest.NewNetworkHarness(miner, bd)
 	if err != nil {
 		ht.Fatalf("unable to create lightning network harness: %v", err)
 	}
