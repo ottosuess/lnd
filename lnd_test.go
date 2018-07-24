@@ -10755,29 +10755,58 @@ var testsCases = []*testCase{
 func TestLightningNetworkDaemon(t *testing.T) {
 	ht := newHarnessTest(t)
 
+	// Declare the network harness here to gain access to its
+	// 'OnTxAccepted' call back.
 	var lndHarness *lntest.NetworkHarness
-
-	// First create an instance of the btcd's rpctest.Harness. This will be
-	// used to fund the wallets of the nodes within the test network and to
-	// drive blockchain related events within the network. Revert the default
-	// setting of accepting non-standard transactions on simnet to reject them.
-	// Transactions on the lightning network should always be standard to get
-	// better guarantees of getting included in to blocks.
-	args := []string{"--rejectnonstd"}
 	handlers := &rpcclient.NotificationHandlers{
 		OnTxAccepted: func(hash *chainhash.Hash, amt btcutil.Amount) {
 			lndHarness.OnTxAccepted(hash)
 		},
 	}
-	btcdHarness, err := rpctest.New(harnessNetParams, handlers, args)
+
+	// Now create a new rpctest.harness that will act as our backend node.
+	// Add an argument to ensure we are connecting the chain backend to the
+	// miner.
+	args := []string{"--rejectnonstd"}
+	chainBackend, err := rpctest.New(harnessNetParams, handlers, args)
 	if err != nil {
 		ht.Fatalf("unable to create mining node: %v", err)
 	}
-	defer btcdHarness.TearDown()
+	defer chainBackend.TearDown()
 
-	// First create the network harness to gain access to its
-	// 'OnTxAccepted' call back.
-	lndHarness, err = lntest.NewNetworkHarness(btcdHarness)
+	if err := chainBackend.SetUp(false, 0); err != nil {
+		ht.Fatalf("unable to set up chain backend: %v", err)
+	}
+
+	if err := chainBackend.Node.NotifyNewTransactions(false); err != nil {
+		ht.Fatalf("unable to request transaction notifications: %v", err)
+	}
+	// Create an instance of the btcd's rpctest.Harness that will act as
+	// the miner for all tests. This will be used to fund the wallets of
+	// the nodes within the test network and to drive blockchain related
+	// events within the network. Revert the default setting of accepting
+	// non-standard transactions on simnet to reject them. Transactions on
+	// the lightning network should always be standard to get better
+	// guarantees of getting included in to blocks.
+	extraArgs := append(
+		args, fmt.Sprintf("--connect=%v", bd.P2PAddr()),
+	)
+	miner, err := rpctest.New(harnessNetParams, nil, extraArgs)
+	if err != nil {
+		ht.Fatalf("unable to create mining node: %v", err)
+	}
+	defer miner.TearDown()
+
+	if err := miner.SetUp(true, 50); err != nil {
+		ht.Fatalf("unable to set up mining node: %v", err)
+	}
+	if err := miner.Node.NotifyNewTransactions(false); err != nil {
+		ht.Fatalf("unable to request transaction notifications: %v", err)
+	}
+
+	// Now we can set up our test harness (LND instance), with the chain
+	// backend we just created.
+	lndHarness, err = lntest.NewNetworkHarness(miner, chainBackend)
 	if err != nil {
 		ht.Fatalf("unable to create lightning network harness: %v", err)
 	}
@@ -10799,17 +10828,10 @@ func TestLightningNetworkDaemon(t *testing.T) {
 		}
 	}()
 
-	if err := btcdHarness.SetUp(true, 50); err != nil {
-		ht.Fatalf("unable to set up mining node: %v", err)
-	}
-	if err := btcdHarness.Node.NotifyNewTransactions(false); err != nil {
-		ht.Fatalf("unable to request transaction notifications: %v", err)
-	}
-
 	// Next mine enough blocks in order for segwit and the CSV package
 	// soft-fork to activate on SimNet.
 	numBlocks := chaincfg.SimNetParams.MinerConfirmationWindow * 2
-	if _, err := btcdHarness.Node.Generate(numBlocks); err != nil {
+	if _, err := miner.Node.Generate(numBlocks); err != nil {
 		ht.Fatalf("unable to generate blocks: %v", err)
 	}
 
