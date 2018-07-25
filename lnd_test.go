@@ -1640,27 +1640,29 @@ func assertCommitmentMaturity(t *harnessTest,
 
 // assertForceClosedChannelNumHtlcs verifies that a force closed channel has the
 // proper number of htlcs.
-func assertPendingChannelNumHtlcs(t *harnessTest,
+func assertPendingChannelNumHtlcs(
 	forceClose *lnrpc.PendingChannelsResponse_ForceClosedChannel,
-	expectedNumHtlcs int) {
+	expectedNumHtlcs int) error {
 
 	if len(forceClose.PendingHtlcs) != expectedNumHtlcs {
-		t.Fatalf("expected force closed channel to have %d pending "+
+		return fmt.Errorf("expected force closed channel to have %d pending "+
 			"htlcs, found %d instead", expectedNumHtlcs,
 			len(forceClose.PendingHtlcs))
 	}
+	return nil
 }
 
 // assertNumForceClosedChannels checks that a pending channel response has the
 // expected number of force closed channels.
-func assertNumForceClosedChannels(t *harnessTest,
-	pendingChanResp *lnrpc.PendingChannelsResponse, expectedNumChans int) {
+func assertNumForceClosedChannels(
+	pendingChanResp *lnrpc.PendingChannelsResponse, expectedNumChans int) error {
 
 	if len(pendingChanResp.PendingForceClosingChannels) != expectedNumChans {
-		t.Fatalf("expected to find %d force closed channels, got %d",
+		return fmt.Errorf("expected to find %d force closed channels, got %d",
 			expectedNumChans,
 			len(pendingChanResp.PendingForceClosingChannels))
 	}
+	return nil
 }
 
 // assertNumWaitingCloseChannels checks that a pending channel response has the
@@ -1678,26 +1680,27 @@ func assertNumWaitingCloseChannels(t *harnessTest,
 // assertPendingHtlcStageAndMaturity uniformly tests all pending htlc's
 // belonging to a force closed channel, testing for the expected stage number,
 // blocks till maturity, and the maturity height.
-func assertPendingHtlcStageAndMaturity(t *harnessTest,
+func assertPendingHtlcStageAndMaturity(
 	forceClose *lnrpc.PendingChannelsResponse_ForceClosedChannel,
-	stage, maturityHeight uint32, blocksTillMaturity int32) {
+	stage, maturityHeight uint32, blocksTillMaturity int32) error {
 
 	for _, pendingHtlc := range forceClose.PendingHtlcs {
 		if pendingHtlc.Stage != stage {
-			t.Fatalf("expected pending htlc to be stage %d, "+
+			return fmt.Errorf("expected pending htlc to be stage %d, "+
 				"found %d", stage, pendingHtlc.Stage)
 		}
 		if pendingHtlc.MaturityHeight != maturityHeight {
-			t.Fatalf("expected pending htlc maturity height to be "+
+			return fmt.Errorf("expected pending htlc maturity height to be "+
 				"%d, instead has %d", maturityHeight,
 				pendingHtlc.MaturityHeight)
 		}
 		if pendingHtlc.BlocksTilMaturity != blocksTillMaturity {
-			t.Fatalf("expected pending htlc blocks til maturity "+
+			return fmt.Errorf("expected pending htlc blocks til maturity "+
 				"to be %d, instead has %d", blocksTillMaturity,
 				pendingHtlc.BlocksTilMaturity)
 		}
 	}
+	return nil
 }
 
 // testChannelForceClosure performs a test to exercise the behavior of "force"
@@ -1974,7 +1977,10 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	if err != nil {
 		t.Fatalf("unable to query for pending channels: %v", err)
 	}
-	assertNumForceClosedChannels(t, pendingChanResp, 1)
+	err = assertNumForceClosedChannels(pendingChanResp, 1)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	forceClose = findForceClosedChannel(t, pendingChanResp, &op)
 
@@ -2051,7 +2057,10 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	if err != nil {
 		t.Fatalf("unable to query for pending channels: %v", err)
 	}
-	assertNumForceClosedChannels(t, pendingChanResp, 1)
+	err = assertNumForceClosedChannels(pendingChanResp, 1)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// The htlc funds will still be shown as limbo, since they are still in
 	// their first stage. The commitment funds will have been recovered
@@ -2084,24 +2093,49 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 	time.Sleep(duration)
 
-	pendingChanResp, err = net.Alice.PendingChannels(ctxb, pendingChansRequest)
+	err = lntest.WaitPredicate(func() bool {
+		pendingChanResp, err = net.Alice.PendingChannels(ctxb, pendingChansRequest)
+		if err != nil {
+			predErr = fmt.Errorf("unable to query for pending channels: %v", err)
+			return false
+		}
+		err = assertNumForceClosedChannels(pendingChanResp, 1)
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		forceClose, err = findForceClosedChannel(pendingChanResp, &op)
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		// We should now be at the block just before the utxo nursery will
+		// attempt to broadcast the htlc timeout transactions.
+		err = assertPendingChannelNumHtlcs(forceClose, numInvoices)
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		err = assertPendingHtlcStageAndMaturity(forceClose, 1, htlcExpiryHeight, 1)
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		// Now that our commitment confirmation depth has been surpassed, we
+		// should now see a non-zero recovered balance. All htlc outputs are
+		// still left in limbo, so it should be non-zero as well.
+		if forceClose.LimboBalance == 0 {
+			predErr = fmt.Errorf("htlc funds should still be in limbo")
+			return false
+		}
+		return true
+	}, time.Second*15)
 	if err != nil {
-		t.Fatalf("unable to query for pending channels: %v", err)
-	}
-	assertNumForceClosedChannels(t, pendingChanResp, 1)
-
-	forceClose = findForceClosedChannel(t, pendingChanResp, &op)
-
-	// We should now be at the block just before the utxo nursery will
-	// attempt to broadcast the htlc timeout transactions.
-	assertPendingChannelNumHtlcs(t, forceClose, numInvoices)
-	assertPendingHtlcStageAndMaturity(t, forceClose, 1, htlcExpiryHeight, 1)
-
-	// Now that our commitment confirmation depth has been surpassed, we
-	// should now see a non-zero recovered balance. All htlc outputs are
-	// still left in limbo, so it should be non-zero as well.
-	if forceClose.LimboBalance == 0 {
-		t.Fatalf("htlc funds should still be in limbo")
+		t.Fatalf("%v", predErr)
 	}
 
 	// Now, generate the block which will cause Alice to broadcast the
@@ -2190,7 +2224,10 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	if err != nil {
 		t.Fatalf("unable to query for pending channels: %v", err)
 	}
-	assertNumForceClosedChannels(t, pendingChanResp, 1)
+	err = assertNumForceClosedChannels(pendingChanResp, 1)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	forceClose = findForceClosedChannel(t, pendingChanResp, &op)
 
@@ -2198,7 +2235,10 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("htlc funds should still be in limbo")
 	}
 
-	assertPendingChannelNumHtlcs(t, forceClose, numInvoices)
+	err = assertPendingChannelNumHtlcs(forceClose, numInvoices)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// Generate a block that causes Alice to sweep the htlc outputs in the
 	// kindergarten bucket.
@@ -2266,14 +2306,28 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	if err != nil {
 		t.Fatalf("unable to query for pending channels: %v", err)
 	}
-	assertNumForceClosedChannels(t, pendingChanResp, 1)
+	err = assertNumForceClosedChannels(pendingChanResp, 1)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// All htlcs should show zero blocks until maturity, as evidenced by
 	// having checked the sweep transaction in the mempool.
-	forceClose = findForceClosedChannel(t, pendingChanResp, &op)
-	assertPendingChannelNumHtlcs(t, forceClose, numInvoices)
-	assertPendingHtlcStageAndMaturity(t, forceClose, 2,
+	forceClose, err = findForceClosedChannel(pendingChanResp, &op)
+	if err != nil {
+		t.Fatalf("unable to find force closed channel: %v", err)
+	}
+
+	err = assertPendingChannelNumHtlcs(forceClose, numInvoices)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	err = assertPendingHtlcStageAndMaturity(forceClose, 2,
 		htlcCsvMaturityHeight, 0)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// Generate the final block that sweeps all htlc funds into the user's
 	// wallet.
@@ -2289,7 +2343,10 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	if err != nil {
 		t.Fatalf("unable to query for pending channels: %v", err)
 	}
-	assertNumForceClosedChannels(t, pendingChanResp, 0)
+	err = assertNumForceClosedChannels(pendingChanResp, 0)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// In addition to there being no pending channels, we verify that
 	// pending channels does not report any money still in limbo.
