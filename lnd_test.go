@@ -11444,9 +11444,14 @@ func TestLightningNetworkDaemon(t *testing.T) {
 	}
 	defer btcdHarness.TearDown()
 
+	chainBackend := lntest.BtcdBackendConfig{
+		RPCConfig: btcdHarness.RPCConfig(),
+		Harness:   btcdHarness,
+	}
+
 	// First create the network harness to gain access to its
 	// 'OnTxAccepted' call back.
-	lndHarness, err = lntest.NewNetworkHarness(btcdHarness)
+	lndHarness, err = lntest.NewNetworkHarness(btcdHarness, chainBackend)
 	if err != nil {
 		ht.Fatalf("unable to create lightning network harness: %v", err)
 	}
