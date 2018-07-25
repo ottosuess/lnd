@@ -1817,7 +1817,8 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// execute a force closure of the channel. This will also assert that
 	// the commitment transaction was immediately broadcast in order to
 	// fulfill the force closure request.
-	_, closingTxID, err := net.CloseChannel(ctxb, net.Alice, chanPoint, true)
+	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	_, closingTxID, err := net.CloseChannel(ctxt, net.Alice, chanPoint, true)
 	if err != nil {
 		t.Fatalf("unable to execute force channel closure: %v", err)
 	}
@@ -3700,7 +3701,9 @@ func testPrivateChannels(net *lntest.NetworkHarness, t *harnessTest) {
 	// One block is enough to make the channel ready for use, since the
 	// nodes have defaultNumConfs=1 set.
 	block := mineBlocks(t, net, 1)[0]
-	chanPointPrivate, err := net.WaitForChannelOpen(ctxb, chanOpenUpdate)
+
+	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	chanPointPrivate, err := net.WaitForChannelOpen(ctxt, chanOpenUpdate)
 	if err != nil {
 		t.Fatalf("error while waiting for channel open: %v", err)
 	}
