@@ -11529,10 +11529,10 @@ func TestLightningNetworkDaemon(t *testing.T) {
 		},
 	}
 
-	// Start a btcd chain backend.
-	chainBackend, cleanUp, err := lntest.NewBtcdBackend()
+	// Start a bitcoind chain backend.
+	chainBackend, cleanUp, err := lntest.NewBitcoindBackend()
 	if err != nil {
-		ht.Fatalf("unable to start btcd: %v", err)
+		ht.Fatalf("unable to start bitcoind: %v", err)
 	}
 	defer cleanUp()
 
