@@ -484,7 +484,14 @@ func (n *NetworkHarness) ConnectNodes(ctx context.Context, a, b *HarnessNode) er
 			Host:   b.cfg.P2PAddr(),
 		},
 	}
+
+tryconnect:
 	if _, err := a.ConnectPeer(ctx, req); err != nil {
+		// If the chain backend is still syncing, retry.
+		if strings.Contains(err.Error(), "still syncing") {
+			<-time.After(100 * time.Millisecond)
+			goto tryconnect
+		}
 		return err
 	}
 
