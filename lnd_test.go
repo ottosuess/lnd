@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	prand "math/rand"
 
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/integration/rpctest"
@@ -1093,57 +1094,86 @@ func testUpdateChannelPolicy(net *lntest.NetworkHarness, t *harnessTest) {
 	closeChannelAndAssert(ctxt, t, net, net.Alice, chanPoint3, false)
 }
 
+// waitForNodeBlockHeight queries the node for its current block height until
+// it reaches the passed height.
+func waitForNodeBlockHeight(ctx context.Context, node *lntest.HarnessNode,
+	height int32) error {
+	var predErr error
+	err := lntest.WaitPredicate(func() bool {
+		ctxt, _ := context.WithTimeout(ctx, 10*time.Second)
+		info, err := node.GetInfo(ctxt, &lnrpc.GetInfoRequest{})
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		if int32(info.BlockHeight) != height {
+			predErr = fmt.Errorf("expected block height to "+
+				"be %v, was %v", height, info.BlockHeight)
+			return false
+		}
+		return true
+	}, 15*time.Second)
+	if err != nil {
+		return predErr
+	}
+	return nil
+}
+
 // testOpenChannelAfterReorg tests that in the case where we have an open
 // channel where the funding tx gets reorged out, the channel will no
 // longer be present in the node's routing table.
 func testOpenChannelAfterReorg(net *lntest.NetworkHarness, t *harnessTest) {
-	ctxb := context.Background()
+	var (
+		ctxb = context.Background()
+		temp = "temp"
+		perm = "perm"
+	)
 
 	// Set up a new miner that we can use to cause a reorg.
 	args := []string{"--rejectnonstd"}
-	miner, err := rpctest.New(harnessNetParams,
+	tempMiner, err := rpctest.New(harnessNetParams,
 		&rpcclient.NotificationHandlers{}, args)
 	if err != nil {
 		t.Fatalf("unable to create mining node: %v", err)
 	}
-	if err := miner.SetUp(true, 50); err != nil {
+	if err := tempMiner.SetUp(true, 50); err != nil {
 		t.Fatalf("unable to set up mining node: %v", err)
 	}
-	defer miner.TearDown()
-
-	if err := miner.Node.NotifyNewTransactions(false); err != nil {
-		t.Fatalf("unable to request transaction notifications: %v", err)
-	}
+	defer tempMiner.TearDown()
 
 	// We start by connecting the new miner to our original miner,
 	// such that it will sync to our original chain.
-	if err := rpctest.ConnectNode(net.Miner, miner); err != nil {
-		t.Fatalf("unable to connect harnesses: %v", err)
+	err = net.Miner.Node.Node(btcjson.NConnect,
+		tempMiner.P2PAddress(), &temp)
+	if err != nil {
+		t.Fatalf("unable to remove node: %v", err)
 	}
-	nodeSlice := []*rpctest.Harness{net.Miner, miner}
+	nodeSlice := []*rpctest.Harness{net.Miner, tempMiner}
 	if err := rpctest.JoinNodes(nodeSlice, rpctest.Blocks); err != nil {
 		t.Fatalf("unable to join node on blocks: %v", err)
 	}
 
-	// The two should be on the same blockheight.
-	_, newNodeHeight, err := miner.Node.GetBestBlock()
+	// The two miners should be on the same blockheight.
+	_, tempMinerHeight, err := tempMiner.Node.GetBestBlock()
 	if err != nil {
 		t.Fatalf("unable to get current blockheight %v", err)
 	}
 
-	_, orgNodeHeight, err := net.Miner.Node.GetBestBlock()
+	_, minerHeight, err := net.Miner.Node.GetBestBlock()
 	if err != nil {
 		t.Fatalf("unable to get current blockheight %v", err)
 	}
 
-	if newNodeHeight != orgNodeHeight {
+	if tempMinerHeight != minerHeight {
 		t.Fatalf("expected new miner(%d) and original miner(%d) to "+
-			"be on the same height", newNodeHeight, orgNodeHeight)
+			"be on the same height", tempMinerHeight, minerHeight)
 	}
 
-	// We disconnect the two nodes, such that we can start mining on them
-	// individually without the other one learning about the new blocks.
-	err = net.Miner.Node.AddNode(miner.P2PAddress(), rpcclient.ANRemove)
+	// We disconnect the two miners, such that we can mine two different
+	// chains and can cause a reorg later.
+	err = net.Miner.Node.Node(btcjson.NDisconnect,
+		tempMiner.P2PAddress(), &temp)
 	if err != nil {
 		t.Fatalf("unable to remove node: %v", err)
 	}
@@ -1159,7 +1189,8 @@ func testOpenChannelAfterReorg(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("unable to open channel: %v", err)
 	}
 
-	// Wait for miner to have seen the funding tx.
+	// Wait for miner to have seen the funding tx. The temporary miner is
+	// disconnected, and won't see the transaction.
 	_, err = waitForTxInMempool(net.Miner.Node, minerMempoolTimeout)
 	if err != nil {
 		t.Fatalf("failed to find funding tx in mempool: %v", err)
@@ -1178,25 +1209,46 @@ func testOpenChannelAfterReorg(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// We now cause a fork, by letting our original miner mine 10 blocks,
 	// and our new miner mine 15. This will also confirm our pending
-	// channel, which should be considered open.
+	// channel on the original miner's chain, which should be considered
+	// open.
 	block := mineBlocks(t, net, 10)[0]
 	assertTxInBlock(t, block, fundingTxID)
-	miner.Node.Generate(15)
+	tempMiner.Node.Generate(15)
 
 	// Ensure the chain lengths are what we expect.
-	_, newNodeHeight, err = miner.Node.GetBestBlock()
+	var predErr error
+	err = lntest.WaitPredicate(func() bool {
+		_, tempMinerHeight, err = tempMiner.Node.GetBestBlock()
+		if err != nil {
+			predErr = fmt.Errorf("unable to get current "+
+				"blockheight %v", err)
+			return false
+		}
+
+		_, minerHeight, err = net.Miner.Node.GetBestBlock()
+		if err != nil {
+			predErr = fmt.Errorf("unable to get current "+
+				"blockheight %v", err)
+			return false
+		}
+
+		if tempMinerHeight != minerHeight+5 {
+			predErr = fmt.Errorf("expected new miner(%d) to be 5 "+
+				"blocks ahead of original miner(%d)",
+				tempMinerHeight, minerHeight)
+			return false
+		}
+		return true
+	}, time.Second*15)
 	if err != nil {
-		t.Fatalf("unable to get current blockheight %v", err)
+		t.Fatalf(predErr.Error())
 	}
 
-	_, orgNodeHeight, err = net.Miner.Node.GetBestBlock()
+	// Wait for Alice to sync to the original miner's chain.
+	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
+	err = waitForNodeBlockHeight(ctxt, net.Alice, minerHeight)
 	if err != nil {
-		t.Fatalf("unable to get current blockheight %v", err)
-	}
-
-	if newNodeHeight != orgNodeHeight+5 {
-		t.Fatalf("expected new miner(%d) to be 5 blocks ahead of "+
-			"original miner(%d)", newNodeHeight, orgNodeHeight)
+		t.Fatalf("unable to sync to chain: %v", err)
 	}
 
 	chanPoint := &lnrpc.ChannelPoint{
@@ -1237,46 +1289,90 @@ func testOpenChannelAfterReorg(net *lntest.NetworkHarness, t *harnessTest) {
 			numEdges)
 	}
 
-	// Connecting the two miners should now cause our original one to sync
-	// to the new, and longer chain.
-	if err := rpctest.ConnectNode(net.Miner, miner); err != nil {
-		t.Fatalf("unable to connect harnesses: %v", err)
+	// Now we disconnect Alice's chain backend from the original miner, and
+	// connect the two miners together. Since the temporary miner knows
+	// about a longer chain, both miners should sync to that chain.
+	err = net.Miner.Node.Node(
+		btcjson.NRemove, net.BackendCfg.P2PAddr(), &perm,
+	)
+	if err != nil {
+		t.Fatalf("unable to remove node: %v", err)
 	}
 
-	if err := rpctest.JoinNodes(nodeSlice, rpctest.Blocks); err != nil {
+	// Connecting to the temporary miner should now cause our original
+	// chain to be re-orged out.
+	err = net.Miner.Node.Node(btcjson.NConnect,
+		tempMiner.P2PAddress(), &temp)
+	if err != nil {
+		t.Fatalf("unable to remove node: %v", err)
+	}
+
+	nodes := []*rpctest.Harness{tempMiner, net.Miner}
+	if err := rpctest.JoinNodes(nodes, rpctest.Blocks); err != nil {
 		t.Fatalf("unable to join node on blocks: %v", err)
 	}
 
 	// Once again they should be on the same chain.
-	_, newNodeHeight, err = miner.Node.GetBestBlock()
+	_, tempMinerHeight, err = tempMiner.Node.GetBestBlock()
 	if err != nil {
 		t.Fatalf("unable to get current blockheight %v", err)
 	}
 
-	_, orgNodeHeight, err = net.Miner.Node.GetBestBlock()
+	_, minerHeight, err = net.Miner.Node.GetBestBlock()
 	if err != nil {
 		t.Fatalf("unable to get current blockheight %v", err)
 	}
 
-	if newNodeHeight != orgNodeHeight {
+	if tempMinerHeight != minerHeight {
 		t.Fatalf("expected new miner(%d) and original miner(%d) to "+
-			"be on the same height", newNodeHeight, orgNodeHeight)
+			"be on the same height", tempMinerHeight, minerHeight)
 	}
 
-	time.Sleep(time.Second * 2)
+	// Now we disconnect the two miners, and connect our original miner to
+	// our chain backend once again.
+	err = net.Miner.Node.Node(
+		btcjson.NDisconnect, tempMiner.P2PAddress(), &temp,
+	)
+	if err != nil {
+		t.Fatalf("unable to remove node: %v", err)
+	}
+
+	err = net.Miner.Node.Node(
+		btcjson.NConnect, net.BackendCfg.P2PAddr(), &perm,
+	)
+	if err != nil {
+		t.Fatalf("unable to remove node: %v", err)
+	}
+
+	// This should have caused a reorg, and Alice should sync to the longer
+	// chain, where the funding transaction is not confirmed.
+	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
+	err = waitForNodeBlockHeight(ctxt, net.Alice, tempMinerHeight)
+	if err != nil {
+		t.Fatalf("unable to sync to chain: %v", err)
+	}
 
 	// Since the fundingtx was reorged out, Alice should now have no edges
 	// in her graph.
 	req = &lnrpc.ChannelGraphRequest{}
-	chanGraph, err = net.Alice.DescribeGraph(ctxb, req)
-	if err != nil {
-		t.Fatalf("unable to query for alice's routing table: %v", err)
-	}
 
-	numEdges = len(chanGraph.Edges)
-	if numEdges != 0 {
-		t.Fatalf("expected to find no edge in the graph, found %d",
-			numEdges)
+	err = lntest.WaitPredicate(func() bool {
+		chanGraph, err = net.Alice.DescribeGraph(ctxb, req)
+		if err != nil {
+			predErr = fmt.Errorf("unable to query for alice's routing table: %v", err)
+			return false
+		}
+
+		numEdges = len(chanGraph.Edges)
+		if numEdges != 0 {
+			predErr = fmt.Errorf("expected to find no edge in the graph, found %d",
+				numEdges)
+			return false
+		}
+		return true
+	}, time.Second*15)
+	if err != nil {
+		t.Fatalf(predErr.Error())
 	}
 
 	// Cleanup by mining the funding tx again, then closing the channel.
