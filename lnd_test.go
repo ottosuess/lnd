@@ -1024,8 +1024,8 @@ func testUpdateChannelPolicy(net *lntest.NetworkHarness, t *harnessTest) {
 	closeChannelAndAssert(ctxt, t, net, net.Alice, chanPoint, false)
 	ctxt, _ = context.WithTimeout(ctxb, timeout)
 	closeChannelAndAssert(ctxt, t, net, net.Bob, chanPoint2, false)
-	closeChannelAndAssert(ctxt, t, net, net.Alice, chanPoint3, false)
 	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	closeChannelAndAssert(ctxt, t, net, net.Alice, chanPoint3, false)
 }
 
 // testOpenChannelAfterReorg tests that in the case where we have an open
@@ -4856,7 +4856,7 @@ func testFailingChannel(net *lntest.NetworkHarness, t *harnessTest) {
 	// Carol will use the correct preimage to resolve the HTLC on-chain.
 	_, err = waitForTxInMempool(net.Miner.Node, 5*time.Second)
 	if err != nil {
-		t.Fatalf("unable to find Bob's breach tx in mempool: %v", err)
+		t.Fatalf("unable to find Carol's resolve tx in mempool: %v", err)
 	}
 
 	// Mine enough blocks for Alice to sweep her funds from the force
@@ -4869,7 +4869,7 @@ func testFailingChannel(net *lntest.NetworkHarness, t *harnessTest) {
 	// Wait for the sweeping tx to be broadcast.
 	_, err = waitForTxInMempool(net.Miner.Node, 5*time.Second)
 	if err != nil {
-		t.Fatalf("unable to find Bob's breach tx in mempool: %v", err)
+		t.Fatalf("unable to find Alice's sweep tx in mempool: %v", err)
 	}
 
 	// Mine the sweep.
