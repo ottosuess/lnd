@@ -44,6 +44,7 @@ var (
 
 const (
 	testFeeBase         = 1e+6
+	defaultCSV          = 4
 	defaultTimeout      = time.Second * 30
 	minerMempoolTimeout = time.Second * 30
 	channelOpenTimeout  = time.Second * 30
@@ -1715,7 +1716,6 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// TODO(roasbeef): should check default value in config here
 	// instead, or make delay a param
-	defaultCSV := uint32(4)
 	defaultCLTV := uint32(defaultBitcoinTimeLockDelta)
 
 	// Since we'd like to test failure scenarios with outstanding htlcs,
@@ -4757,7 +4757,6 @@ func testFailingChannel(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
 	const (
 		paymentAmt = 10000
-		defaultCSV = 4
 	)
 
 	chanAmt := maxFundingAmount
@@ -7758,7 +7757,6 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 		dustHtlcAmt    = btcutil.Amount(100)
 		htlcAmt        = btcutil.Amount(30000)
 		finalCltvDelta = 40
-		csvDelay       = 4
 	)
 	alicePayStream, err := net.Alice.SendPayment(ctxb)
 	if err != nil {
@@ -7848,9 +7846,9 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("htlc mismatch: %v", predErr)
 	}
 
-	// We'll mine csvDelay blocks in order to generate the sweep transaction
+	// We'll mine defaultCSV blocks in order to generate the sweep transaction
 	// of Bob's funding output.
-	if _, err := net.Miner.Node.Generate(csvDelay); err != nil {
+	if _, err := net.Miner.Node.Generate(defaultCSV); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
@@ -7861,7 +7859,7 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// We'll now mine the remaining blocks to cause the HTLC itself to
 	// timeout.
-	if _, err := net.Miner.Node.Generate(defaultBroadcastDelta - csvDelay); err != nil {
+	if _, err := net.Miner.Node.Generate(defaultBroadcastDelta - defaultCSV); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
@@ -7969,8 +7967,6 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 // transaction, and finish settling the HTLC backwards into the route.
 func testMultiHopReceiverChainClaim(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
-
-	defaultCSV := uint32(4)
 
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
 	// Carol refusing to actually settle or directly cancel any HTLC's
@@ -8205,7 +8201,6 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 	// to Carol. As Carol is in hodl mode, she won't settle this HTLC which
 	// opens up the base for out tests.
 	const (
-		csvDelay       = 4
 		finalCltvDelta = 40
 		htlcAmt        = btcutil.Amount(30000)
 	)
@@ -8280,9 +8275,9 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 		t.Fatalf(predErr.Error())
 	}
 
-	// We'll mine csvDelay blocks in order to generate the sweep transaction
+	// We'll mine defaultCSV blocks in order to generate the sweep transaction
 	// of Bob's funding output.
-	if _, err := net.Miner.Node.Generate(csvDelay); err != nil {
+	if _, err := net.Miner.Node.Generate(defaultCSV); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
@@ -8293,7 +8288,7 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 
 	// We'll now mine enough blocks for the HTLC to expire. After this, Bob
 	// should hand off the now expired HTLC output to the utxo nursery.
-	if _, err := net.Miner.Node.Generate(finalCltvDelta - csvDelay - 1); err != nil {
+	if _, err := net.Miner.Node.Generate(finalCltvDelta - defaultCSV - 1); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
@@ -8394,7 +8389,7 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 	// We'll now mine 4 additional blocks. This should be enough for Bob's
 	// CSV timelock to expire and the sweeping transaction of the HTLC to be
 	// broadcast.
-	if _, err := net.Miner.Node.Generate(csvDelay); err != nil {
+	if _, err := net.Miner.Node.Generate(defaultCSV); err != nil {
 		t.Fatalf("unable to mine blocks: %v", err)
 	}
 
@@ -8456,7 +8451,6 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 	// to Carol. As Carol is in hodl mode, she won't settle this HTLC which
 	// opens up the base for out tests.
 	const (
-		csvDelay       = 4
 		finalCltvDelta = 40
 		htlcAmt        = btcutil.Amount(30000)
 	)
@@ -8649,8 +8643,6 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
 
-	defaultCSV := uint32(4)
-
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
 	// Carol refusing to actually settle or directly cancel any HTLC's
 	// self.
@@ -8789,7 +8781,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 	}
 
 	// Keep track of the second level tx maturity.
-	carolSecondLevelCSV := defaultCSV
+	carolSecondLevelCSV := uint32(defaultCSV)
 
 	// When Bob notices Carol's second level transaction in the block, he
 	// will extract the preimage and broadcast a second level tx to claim
@@ -8864,7 +8856,7 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 
 	// Keep track of Bob's second level maturity, and decrement our track
 	// of Carol's.
-	bobSecondLevelCSV := defaultCSV
+	bobSecondLevelCSV := uint32(defaultCSV)
 	carolSecondLevelCSV--
 
 	// If we then mine 3 additional blocks, Carol's second level tx should
@@ -8979,8 +8971,6 @@ func testMultiHopHtlcLocalChainClaim(net *lntest.NetworkHarness, t *harnessTest)
 // HTLC on-chain in order to ensure that we don't lose any funds.
 func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest) {
 	ctxb := context.Background()
-
-	defaultCSV := uint32(4)
 
 	// First, we'll create a three hop network: Alice -> Bob -> Carol, with
 	// Carol refusing to actually settle or directly cancel any HTLC's
@@ -9116,7 +9106,7 @@ func testMultiHopHtlcRemoteChainClaim(net *lntest.NetworkHarness, t *harnessTest
 	}
 
 	// Keep track of the second level tx maturity.
-	carolSecondLevelCSV := defaultCSV
+	carolSecondLevelCSV := uint32(defaultCSV)
 
 	// When Bob notices Carol's second level transaction in the block, he
 	// will extract the preimage and broadcast a sweep tx to directly claim
