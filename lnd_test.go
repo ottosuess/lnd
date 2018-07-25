@@ -1689,20 +1689,21 @@ func findWaitingCloseChannel(t *harnessTest,
 	return waitingClose
 }
 
-func assertCommitmentMaturity(t *harnessTest,
+func assertCommitmentMaturity(
 	forceClose *lnrpc.PendingChannelsResponse_ForceClosedChannel,
-	maturityHeight uint32, blocksTilMaturity int32) {
+	maturityHeight uint32, blocksTilMaturity int32) error {
 
 	if forceClose.MaturityHeight != maturityHeight {
-		t.Fatalf("expected commitment maturity height to be %d, "+
+		return fmt.Errorf("expected commitment maturity height to be %d, "+
 			"found %d instead", maturityHeight,
 			forceClose.MaturityHeight)
 	}
 	if forceClose.BlocksTilMaturity != blocksTilMaturity {
-		t.Fatalf("expected commitment blocks til maturity to be %d, "+
+		return fmt.Errorf("expected commitment blocks til maturity to be %d, "+
 			"found %d instead", blocksTilMaturity,
 			forceClose.BlocksTilMaturity)
 	}
+	return nil
 }
 
 // assertForceClosedChannelNumHtlcs verifies that a force closed channel has the
@@ -1982,37 +1983,57 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// database update may fail, causing the UTXO nursery to retry the move
 	// operation upon restart. This will change the blockheights from what
 	// is expected by the test.
-	// TODO(bvu): refactor out this sleep.
 	duration := time.Millisecond * 300
-	time.Sleep(duration)
+	var predErr error
+	err = lntest.WaitPredicate(func() bool {
+		// Now that the commitment has been confirmed, the channel
+		// should be marked as force closed.
+		pendingChanResp, err = net.Alice.PendingChannels(
+			ctxb, pendingChansRequest,
+		)
+		if err != nil {
+			predErr = fmt.Errorf("unable to query for pending "+
+				"channels: %v", err)
+			return false
+		}
 
-	// Now that the commitment has been confirmed, the channel should be
-	// marked as force closed.
-	pendingChanResp, err = net.Alice.PendingChannels(ctxb, pendingChansRequest)
+		err = assertNumForceClosedChannels(pendingChanResp, 1)
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		forceClose, err := findForceClosedChannel(pendingChanResp, &op)
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		// Now that the channel has been force closed, it should now
+		// have the height and number of blocks to confirm populated.
+		err = assertCommitmentMaturity(forceClose, commCsvMaturityHeight,
+			int32(defaultCSV))
+		if err != nil {
+			predErr = err
+			return false
+		}
+
+		// None of our outputs have been swept, so they should all be
+		// limbo.
+		if forceClose.LimboBalance == 0 {
+			predErr = fmt.Errorf("all funds should still be in " +
+				"limbo")
+			return false
+		}
+		if forceClose.RecoveredBalance != 0 {
+			predErr = fmt.Errorf("no funds should yet be shown " +
+				"as recovered")
+			return false
+		}
+		return true
+	}, time.Second*15)
 	if err != nil {
-		t.Fatalf("unable to query for pending channels: %v", err)
-	}
-	err = assertNumForceClosedChannels(pendingChanResp, 1)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-
-	forceClose, err := findForceClosedChannel(pendingChanResp, &op)
-	if err != nil {
-		t.Fatalf("unable to find force closed channel: %v", err)
-	}
-
-	// Now that the channel has been force closed, it should now have the
-	// height and number of blocks to confirm populated.
-	assertCommitmentMaturity(t, forceClose, commCsvMaturityHeight,
-		int32(defaultCSV))
-
-	// None of our outputs have been swept, so they should all be limbo.
-	if forceClose.LimboBalance == 0 {
-		t.Fatalf("all funds should still be in limbo")
-	}
-	if forceClose.RecoveredBalance != 0 {
-		t.Fatalf("no funds should yet be shown as recovered")
+		t.Fatalf("%v", predErr)
 	}
 
 	// The following restart is intended to ensure that outputs from the
@@ -2055,7 +2076,7 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf(err.Error())
 	}
 
-	forceClose, err = findForceClosedChannel(pendingChanResp, &op)
+	forceClose, err := findForceClosedChannel(pendingChanResp, &op)
 	if err != nil {
 		t.Fatalf("unable to find force closed channel: %v", err)
 	}
@@ -2064,7 +2085,10 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// 1 block left before its CSV delay expires. In total, we have mined
 	// exactly defaultCSV blocks, so the htlc outputs should also reflect
 	// that this many blocks have passed.
-	assertCommitmentMaturity(t, forceClose, commCsvMaturityHeight, 1)
+	err = assertCommitmentMaturity(forceClose, commCsvMaturityHeight, 1)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// All funds should still be shown in limbo.
 	if forceClose.LimboBalance == 0 {
@@ -2169,7 +2193,6 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 	time.Sleep(duration)
 
-	var predErr error
 	err = lntest.WaitPredicate(func() bool {
 		pendingChanResp, err = net.Alice.PendingChannels(ctxb, pendingChansRequest)
 		if err != nil {
