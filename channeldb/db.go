@@ -12,6 +12,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coreos/bbolt"
 	"github.com/go-errors/errors"
+	"github.com/lightningnetwork/lnd/lnwire"
 )
 
 const (
@@ -64,6 +65,8 @@ var (
 	// Big endian is the preferred byte order, due to cursor scans over
 	// integer keys iterating in order.
 	byteOrder = binary.BigEndian
+
+	chanSyncMsgBucket = []byte("chan-sync-msg-key")
 )
 
 var bufPool = &sync.Pool{
@@ -648,6 +651,96 @@ func (db *DB) PruneLinkNodes() error {
 
 		return nil
 	})
+}
+
+func (db *DB) PutChanSyncMsg(peerKey *btcec.PublicKey,
+	fundingOutpoint *wire.OutPoint, msg *lnwire.ChannelReestablish) error {
+
+	return db.Update(func(tx *bolt.Tx) error {
+		return putChanSyncMsg(
+			tx, peerKey, fundingOutpoint, msg,
+		)
+	})
+}
+
+func putChanSyncMsg(tx *bolt.Tx, peerKey *btcec.PublicKey,
+	outPoint *wire.OutPoint, msg *lnwire.ChannelReestablish) error {
+
+	chanSyncBucket, err := tx.CreateBucketIfNotExists(chanSyncMsgBucket)
+	if err != nil {
+		return err
+	}
+
+	nodePub := peerKey.SerializeCompressed()
+	nodeBucket, err := chanSyncBucket.CreateBucketIfNotExists(nodePub)
+	if err != nil {
+		return err
+	}
+
+	var b bytes.Buffer
+	if err := WriteElement(&b, msg); err != nil {
+		return err
+	}
+
+	var chanPointBuf bytes.Buffer
+	if err := writeOutpoint(&chanPointBuf, outPoint); err != nil {
+		return fmt.Errorf("unable to write outpoint: %v", err)
+	}
+
+	err = nodeBucket.Put(chanPointBuf.Bytes(), b.Bytes())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) FetchChanSyncMsgs(peerKey *btcec.PublicKey) (
+	[]*lnwire.ChannelReestablish, error) {
+
+	var msgs []*lnwire.ChannelReestablish
+	var err error
+	if err := db.View(func(tx *bolt.Tx) error {
+		msgs, err = fetchChanSyncMsgs(tx, peerKey)
+		if err != nil {
+			return err
+		}
+		return nil
+
+	}); err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
+func fetchChanSyncMsgs(tx *bolt.Tx, peerKey *btcec.PublicKey) (
+	[]*lnwire.ChannelReestablish, error) {
+
+	chanSyncBucket := tx.Bucket(chanSyncMsgBucket)
+	if chanSyncBucket == nil {
+		return nil, nil
+	}
+
+	nodePub := peerKey.SerializeCompressed()
+	nodeBucket := chanSyncBucket.Bucket(nodePub)
+	if nodeBucket == nil {
+		return nil, nil
+	}
+
+	var msgs []*lnwire.ChannelReestablish
+	err := nodeBucket.ForEach(func(_, v []byte) error {
+		r := bytes.NewReader(v)
+		chanSync := &lnwire.ChannelReestablish{}
+		if err := chanSync.Decode(r, 0); err != nil {
+			return err
+		}
+		msgs = append(msgs, chanSync)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return msgs, nil
 }
 
 // syncVersions function is used for safe db version synchronization. It
