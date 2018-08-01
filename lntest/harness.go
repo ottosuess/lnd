@@ -11,7 +11,6 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/grpclog"
 
-	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/integration/rpctest"
@@ -19,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/lightningnetwork/lnd/lnrpc"
 )
 
 // NetworkHarness is an integration testing harness for the lightning network.
@@ -553,6 +553,18 @@ func (n *NetworkHarness) RestartNode(node *HarnessNode, callback func() error) e
 	}
 
 	return node.start(n.lndErrorChan)
+}
+
+func (n *NetworkHarness) SuspendNode(node *HarnessNode) (func() error, error) {
+	if err := node.stop(); err != nil {
+		return nil, err
+	}
+
+	restart := func() error {
+		return node.start(n.lndErrorChan)
+	}
+
+	return restart, nil
 }
 
 // ShutdownNode stops an active lnd process and returns when the process has
