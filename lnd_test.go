@@ -5350,7 +5350,7 @@ func testRevokedCloseRetribution(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("justice tx wasn't mined")
 	}
 
-	assertNodeNumChannels(t, ctxb, carol, 0)
+	assertNodeNumChannels(t, ctxb, carol, 0, false)
 }
 
 // testRevokedCloseRetributionZeroValueRemoteOutput tests that Dave is able
@@ -5611,7 +5611,7 @@ func testRevokedCloseRetributionZeroValueRemoteOutput(net *lntest.NetworkHarness
 		t.Fatalf("justice tx wasn't mined")
 	}
 
-	assertNodeNumChannels(t, ctxb, dave, 0)
+	assertNodeNumChannels(t, ctxb, dave, 0, false)
 }
 
 // testRevokedCloseRetributionRemoteHodl tests that Dave properly responds to a
@@ -6043,7 +6043,7 @@ func testRevokedCloseRetributionRemoteHodl(net *lntest.NetworkHarness,
 	assertTxInBlock(t, block, justiceTxid)
 
 	// Dave should have no open channels.
-	assertNodeNumChannels(t, ctxb, dave, 0)
+	assertNodeNumChannels(t, ctxb, dave, 0, false)
 }
 
 // assertNumPendingChannels checks that a PendingChannels response from the
@@ -6276,7 +6276,7 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 	if daveChan.NumUpdates != daveStateNumPreCopy {
 		t.Fatalf("db copy failed: %v", daveChan.NumUpdates)
 	}
-	assertNodeNumChannels(t, ctxb, dave, 1)
+	assertNodeNumChannels(t, ctxb, dave, 1, false)
 
 	// Upon reconnection, the nodes should detect that Dave is out of sync.
 	if err := net.ConnectNodes(ctxb, carol, dave); err != nil {
@@ -6366,14 +6366,14 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 			carolBalance)
 	}
 
-	assertNodeNumChannels(t, ctxb, dave, 0)
-	assertNodeNumChannels(t, ctxb, carol, 0)
+	assertNodeNumChannels(t, ctxb, dave, 0, false)
+	assertNodeNumChannels(t, ctxb, carol, 0, false)
 }
 
 // assertNodeNumChannels polls the provided node's list channels rpc until it
 // reaches the desired number of total channels.
 func assertNodeNumChannels(t *harnessTest, ctxb context.Context,
-	node *lntest.HarnessNode, numChannels int) {
+	node *lntest.HarnessNode, numChannels int, activeOnly bool) {
 
 	// Poll node for its list of channels.
 	req := &lnrpc.ListChannelsRequest{}
@@ -6389,7 +6389,13 @@ func assertNodeNumChannels(t *harnessTest, ctxb context.Context,
 
 		// Return true if the query returned the expected number of
 		// channels.
-		num := len(chanInfo.Channels)
+		num := 0
+		for _, c := range chanInfo.Channels {
+			if activeOnly && !c.Active {
+				continue
+			}
+			num++
+		}
 		if num != numChannels {
 			predErr = fmt.Errorf("expected %v channels, got %v",
 				numChannels, num)
