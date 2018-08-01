@@ -6111,24 +6111,175 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 	defer shutdownAndAssert(net, t, dave)
 
-	// We must let Dave communicate with Carol before they are able to open
-	// channel, so we connect them.
-	if err := net.ConnectNodes(ctxb, carol, dave); err != nil {
-		t.Fatalf("unable to connect dave to carol: %v", err)
-	}
-
 	// Before we make a channel, we'll load up Carol with some coins sent
 	// directly from the miner.
 	err = net.SendCoins(ctxb, btcutil.SatoshiPerBitcoin, carol)
 	if err != nil {
 		t.Fatalf("unable to send coins to carol: %v", err)
 	}
+	invoiceIndex := 0
+	createPayReqs := func(node *lntest.HarnessNode,
+		numInvoices int) ([]string, error) {
+		payReqs := make([]string, numInvoices)
+		for i := 0; i < numInvoices; i++ {
+			preimage := bytes.Repeat(
+				[]byte{byte(17 - invoiceIndex)}, 32,
+			)
+			invoiceIndex++
+			invoice := &lnrpc.Invoice{
+				Memo:      "testing",
+				RPreimage: preimage,
+				Value:     paymentAmt,
+			}
+			resp, err := node.AddInvoice(ctxb, invoice)
+			if err != nil {
+				return nil, fmt.Errorf("unable to "+
+					"add invoice: %v", err)
+			}
 
-	// We'll first open up a channel between them with a 0.5 BTC value.
-	ctxt, _ := context.WithTimeout(ctxb, timeout)
-	chanPoint := openChannelAndAssert(
-		ctxt, t, net, carol, dave, chanAmt, 0, false,
-	)
+			payReqs[i] = resp.PaymentRequest
+		}
+		return payReqs, nil
+	}
+
+	// As we'll be querying the state of Dave's channels frequently we'll
+	// create a closure helper function for the purpose.
+	getNodeChanInfo := func(node *lntest.HarnessNode) (*lnrpc.Channel, error) {
+		req := &lnrpc.ListChannelsRequest{}
+		channelInfo, err := node.ListChannels(ctxb, req)
+		if err != nil {
+			return nil, err
+		}
+		if len(channelInfo.Channels) != 1 {
+			t.Fatalf("node should only have a single channel, "+
+				"instead he has %v",
+				len(channelInfo.Channels))
+		}
+
+		return channelInfo.Channels[0], nil
+	}
+
+	for _, node := range []*lntest.HarnessNode{dave} {
+
+		// We must let Dave communicate with Carol before they are able to open
+		// channel, so we connect them.
+		if err := net.ConnectNodes(ctxb, carol, node); err != nil {
+			t.Fatalf("unable to connect dave to carol: %v", err)
+		}
+
+		// We'll first open up a channel between them with a 0.5 BTC value.
+		ctxt, _ := context.WithTimeout(ctxb, timeout)
+		chanPoint := openChannelAndAssert(
+			ctxt, t, net, carol, node, chanAmt, 0, false,
+		)
+
+		// With the channel open, we'll create a few invoices for Dave that
+		// Carol will pay to in order to advance the state of the channel.
+		// TODO(halseth): have dangling HTLCs on the commitment, able to
+		// retrive funds?
+
+		payReqs, err := createPayReqs(node, numInvoices)
+		if err != nil {
+			t.Fatalf("unable to create pay reqs: %v", err)
+		}
+
+		// Wait for Carol to receive the channel edge from the funding manager.
+		ctxt, _ = context.WithTimeout(ctxb, timeout)
+		err = carol.WaitForNetworkChannelOpen(ctxt, chanPoint)
+		if err != nil {
+			t.Fatalf("carol didn't see the carol->%s channel before "+
+				"timeout: %v", node.Name, err)
+		}
+
+		// Send payments from Carol to Dave using 3 of Dave's payment hashes
+		// generated above.
+		ctxt, _ = context.WithTimeout(ctxb, timeout)
+		err = completePaymentRequests(ctxt, carol, payReqs[:numInvoices/2],
+			true)
+		if err != nil {
+			t.Fatalf("unable to send payments: %v", err)
+		}
+
+		// Next query for Dave's channel state, as we sent 3 payments of 10k
+		// satoshis each, Dave should now see his balance as being 30k satoshis.
+		var nodeChan *lnrpc.Channel
+		var predErr error
+		err = lntest.WaitPredicate(func() bool {
+			bChan, err := getNodeChanInfo(node)
+			if err != nil {
+				t.Fatalf("unable to get dave's channel info: %v", err)
+			}
+			if bChan.LocalBalance != 30000 {
+				predErr = fmt.Errorf("dave's balance is incorrect, "+
+					"got %v, expected %v", bChan.LocalBalance,
+					30000)
+				return false
+			}
+
+			nodeChan = bChan
+			return true
+		}, time.Second*15)
+		if err != nil {
+			t.Fatalf("%v", predErr)
+		}
+
+		// Grab Dave's current commitment height (update number), we'll later
+		// revert him to this state after additional updates to revoke this
+		// state.
+		stateNumPreCopy := nodeChan.NumUpdates
+
+		// Create a temporary file to house Dave's database state at this
+		// particular point in history.
+		tempDbPath, err := ioutil.TempDir("", node.Name()+"-past-state")
+		if err != nil {
+			t.Fatalf("unable to create temp db folder: %v", err)
+		}
+		tempDbFile := filepath.Join(tempDbPath, "channel.db")
+		defer os.Remove(tempDbPath)
+
+		// With the temporary file created, copy Dave's current state into the
+		// temporary file we created above. Later after more updates, we'll
+		// restore this state.
+		if err := copyFile(tempDbFile, node.DBPath()); err != nil {
+			t.Fatalf("unable to copy database files: %v", err)
+		}
+
+		// Finally, send payments from Carol to Dave, consuming Dave's remaining
+		// payment hashes.
+		ctxt, _ = context.WithTimeout(ctxb, timeout)
+		err = completePaymentRequests(ctxt, carol, payReqs[numInvoices/2:],
+			true)
+		if err != nil {
+			t.Fatalf("unable to send payments: %v", err)
+		}
+
+		nodeChan, err = getNodeChanInfo(node)
+		if err != nil {
+			t.Fatalf("unable to get dave chan info: %v", err)
+		}
+
+		// Now we shutdown Dave, copying over the his temporary database state
+		// which has the *prior* channel state over his current most up to date
+		// state. With this, we essentially force Dave to travel back in time
+		// within the channel's history.
+		if err = net.RestartNode(node, func() error {
+			return os.Rename(tempDbFile, node.DBPath())
+		}); err != nil {
+			t.Fatalf("unable to restart node: %v", err)
+		}
+
+		// Now query for Dave's channel state, it should show that he's at a
+		// state number in the past, not the *latest* state.
+		nodeChan, err = getNodeChanInfo(node)
+		if err != nil {
+			t.Fatalf("unable to get dave chan info: %v", err)
+		}
+		if nodeChan.NumUpdates != stateNumPreCopy {
+			t.Fatalf("db copy failed: %v", nodeChan.NumUpdates)
+		}
+		assertNodeNumChannels(t, ctxb, node, 1, false)
+
+	}
 
 	// We a´make a note of the nodes' current on-chain balances, to make
 	// sure they are able to retrieve the channel funds eventually,
@@ -6145,146 +6296,13 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 	daveStartingBalance := daveBalResp.ConfirmedBalance
 
-	// With the channel open, we'll create a few invoices for Dave that
-	// Carol will pay to in order to advance the state of the channel.
-	// TODO(halseth): have dangling HTLCs on the commitment, able to
-	// retrive funds?
-	davePayReqs := make([]string, numInvoices)
-	for i := 0; i < numInvoices; i++ {
-		preimage := bytes.Repeat([]byte{byte(17 - i)}, 32)
-		invoice := &lnrpc.Invoice{
-			Memo:      "testing",
-			RPreimage: preimage,
-			Value:     paymentAmt,
-		}
-		resp, err := dave.AddInvoice(ctxb, invoice)
-		if err != nil {
-			t.Fatalf("unable to add invoice: %v", err)
-		}
-
-		davePayReqs[i] = resp.PaymentRequest
-	}
-
-	// As we'll be querying the state of Dave's channels frequently we'll
-	// create a closure helper function for the purpose.
-	getDaveChanInfo := func() (*lnrpc.Channel, error) {
-		req := &lnrpc.ListChannelsRequest{}
-		daveChannelInfo, err := dave.ListChannels(ctxb, req)
-		if err != nil {
-			return nil, err
-		}
-		if len(daveChannelInfo.Channels) != 1 {
-			t.Fatalf("dave should only have a single channel, "+
-				"instead he has %v",
-				len(daveChannelInfo.Channels))
-		}
-
-		return daveChannelInfo.Channels[0], nil
-	}
-
-	// Wait for Carol to receive the channel edge from the funding manager.
-	ctxt, _ = context.WithTimeout(ctxb, timeout)
-	err = carol.WaitForNetworkChannelOpen(ctxt, chanPoint)
-	if err != nil {
-		t.Fatalf("carol didn't see the carol->dave channel before "+
-			"timeout: %v", err)
-	}
-
-	// Send payments from Carol to Dave using 3 of Dave's payment hashes
-	// generated above.
-	ctxt, _ = context.WithTimeout(ctxb, timeout)
-	err = completePaymentRequests(ctxt, carol, davePayReqs[:numInvoices/2],
-		true)
-	if err != nil {
-		t.Fatalf("unable to send payments: %v", err)
-	}
-
-	// Next query for Dave's channel state, as we sent 3 payments of 10k
-	// satoshis each, Dave should now see his balance as being 30k satoshis.
-	var daveChan *lnrpc.Channel
-	var predErr error
-	err = lntest.WaitPredicate(func() bool {
-		bChan, err := getDaveChanInfo()
-		if err != nil {
-			t.Fatalf("unable to get dave's channel info: %v", err)
-		}
-		if bChan.LocalBalance != 30000 {
-			predErr = fmt.Errorf("dave's balance is incorrect, "+
-				"got %v, expected %v", bChan.LocalBalance,
-				30000)
-			return false
-		}
-
-		daveChan = bChan
-		return true
-	}, time.Second*15)
-	if err != nil {
-		t.Fatalf("%v", predErr)
-	}
-
-	// Grab Dave's current commitment height (update number), we'll later
-	// revert him to this state after additional updates to revoke this
-	// state.
-	daveStateNumPreCopy := daveChan.NumUpdates
-
-	// Create a temporary file to house Dave's database state at this
-	// particular point in history.
-	daveTempDbPath, err := ioutil.TempDir("", "dave-past-state")
-	if err != nil {
-		t.Fatalf("unable to create temp db folder: %v", err)
-	}
-	daveTempDbFile := filepath.Join(daveTempDbPath, "channel.db")
-	defer os.Remove(daveTempDbPath)
-
-	// With the temporary file created, copy Dave's current state into the
-	// temporary file we created above. Later after more updates, we'll
-	// restore this state.
-	if err := copyFile(daveTempDbFile, dave.DBPath()); err != nil {
-		t.Fatalf("unable to copy database files: %v", err)
-	}
-
-	// Finally, send payments from Carol to Dave, consuming Dave's remaining
-	// payment hashes.
-	ctxt, _ = context.WithTimeout(ctxb, timeout)
-	err = completePaymentRequests(ctxt, carol, davePayReqs[numInvoices/2:],
-		true)
-	if err != nil {
-		t.Fatalf("unable to send payments: %v", err)
-	}
-
-	daveChan, err = getDaveChanInfo()
-	if err != nil {
-		t.Fatalf("unable to get dave chan info: %v", err)
-	}
-
-	// Now we shutdown Dave, copying over the his temporary database state
-	// which has the *prior* channel state over his current most up to date
-	// state. With this, we essentially force Dave to travel back in time
-	// within the channel's history.
-	if err = net.RestartNode(dave, func() error {
-		return os.Rename(daveTempDbFile, dave.DBPath())
-	}); err != nil {
-		t.Fatalf("unable to restart node: %v", err)
-	}
-
-	// Now query for Dave's channel state, it should show that he's at a
-	// state number in the past, not the *latest* state.
-	daveChan, err = getDaveChanInfo()
-	if err != nil {
-		t.Fatalf("unable to get dave chan info: %v", err)
-	}
-	if daveChan.NumUpdates != daveStateNumPreCopy {
-		t.Fatalf("db copy failed: %v", daveChan.NumUpdates)
-	}
-	assertNodeNumChannels(t, ctxb, dave, 1, false)
-
 	// Upon reconnection, the nodes should detect that Dave is out of sync.
 	if err := net.ConnectNodes(ctxb, carol, dave); err != nil {
 		t.Fatalf("unable to connect dave to carol: %v", err)
 	}
 
 	// Carol should force close the channel using her latest commitment.
-	forceClose, err := waitForTxInMempool(net.Miner.Node, 5*time.Second)
+	forceClose, err := waitForTxInMempool(net.Miner.Node, 15*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Carol's force close tx in mempool: %v",
 			err)
@@ -6344,7 +6362,7 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// After the Carol's output matures, she should also reclaim her funds.
 	mineBlocks(t, net, defaultCSV-1)
-	carolSweep, err := waitForTxInMempool(net.Miner.Node, 5*time.Second)
+	carolSweep, err := waitForTxInMempool(net.Miner.Node, 15*time.Second)
 	if err != nil {
 		t.Fatalf("unable to find Carol's sweep tx in mempool: %v", err)
 	}
@@ -10956,191 +10974,191 @@ type testCase struct {
 }
 
 var testsCases = []*testCase{
-	{
-		name: "onchain fund recovery",
-		test: testOnchainFundRecovery,
-	},
-	{
-		name: "basic funding flow",
-		test: testBasicChannelFunding,
-	},
-	{
-		name: "update channel policy",
-		test: testUpdateChannelPolicy,
-	},
-	{
-		name: "open channel reorg test",
-		test: testOpenChannelAfterReorg,
-	},
-	{
-		name: "disconnecting target peer",
-		test: testDisconnectingTargetPeer,
-	},
-	{
-		name: "graph topology notifications",
-		test: testGraphTopologyNotifications,
-	},
-	{
-		name: "funding flow persistence",
-		test: testChannelFundingPersistence,
-	},
-	{
-		name: "channel force closure",
-		test: testChannelForceClosure,
-	},
-	{
-		name: "channel balance",
-		test: testChannelBalance,
-	},
-	{
-		name: "single hop invoice",
-		test: testSingleHopInvoice,
-	},
-	{
-		name: "sphinx replay persistence",
-		test: testSphinxReplayPersistence,
-	},
-	{
-		name: "list outgoing payments",
-		test: testListPayments,
-	},
-	{
-		name: "max pending channel",
-		test: testMaxPendingChannels,
-	},
-	{
-		name: "multi-hop payments",
-		test: testMultiHopPayments,
-	},
-	{
-		name: "single-hop send to route",
-		test: testSingleHopSendToRoute,
-	},
-	{
-		name: "multi-hop send to route",
-		test: testMultiHopSendToRoute,
-	},
-	{
-		name: "send to route error propagation",
-		test: testSendToRouteErrorPropagation,
-	},
-	{
-		name: "private channels",
-		test: testPrivateChannels,
-	},
-	{
-		name: "invoice routing hints",
-		test: testInvoiceRoutingHints,
-	},
-	{
-		name: "multi-hop payments over private channels",
-		test: testMultiHopOverPrivateChannels,
-	},
-	{
-		name: "multiple channel creation",
-		test: testBasicChannelCreation,
-	},
-	{
-		name: "invoice update subscription",
-		test: testInvoiceSubscriptions,
-	},
-	{
-		name: "multi-hop htlc error propagation",
-		test: testHtlcErrorPropagation,
-	},
-	// TODO(roasbeef): multi-path integration test
-	{
-		name: "node announcement",
-		test: testNodeAnnouncement,
-	},
-	{
-		name: "node sign verify",
-		test: testNodeSignVerify,
-	},
-	{
-		name: "async payments benchmark",
-		test: testAsyncPayments,
-	},
-	{
-		name: "async bidirectional payments",
-		test: testBidirectionalAsyncPayments,
-	},
-	{
-		// bob: outgoing our commit timeout
-		// carol: incoming their commit watch and see timeout
-		name: "test multi-hop htlc local force close immediate expiry",
-		test: testMultiHopHtlcLocalTimeout,
-	},
-	{
-		// bob: outgoing watch and see, they sweep on chain
-		// carol: incoming our commit, know preimage
-		name: "test multi-hop htlc receiver chain claim",
-		test: testMultiHopReceiverChainClaim,
-	},
-	{
-		// bob: outgoing our commit watch and see timeout
-		// carol: incoming their commit watch and see timeout
-		name: "test multi-hop local force close on-chain htlc timeout",
-		test: testMultiHopLocalForceCloseOnChainHtlcTimeout,
-	},
-	{
-		// bob: outgoing their commit watch and see timeout
-		// carol: incoming our commit watch and see timeout
-		name: "test multi-hop remote force close on-chain htlc timeout",
-		test: testMultiHopRemoteForceCloseOnChainHtlcTimeout,
-	},
-	{
-		// bob: outgoing our commit watch and see, they sweep on chain
-		// bob: incoming our commit watch and learn preimage
-		// carol: incoming their commit know preimage
-		name: "test multi-hop htlc local chain claim",
-		test: testMultiHopHtlcLocalChainClaim,
-	},
-	{
-		// bob: outgoing their commit watch and see, they sweep on chain
-		// bob: incoming their commit watch and learn preimage
-		// carol: incoming our commit know preimage
-		name: "test multi-hop htlc remote chain claim",
-		test: testMultiHopHtlcRemoteChainClaim,
-	},
-	{
-		name: "switch circuit persistence",
-		test: testSwitchCircuitPersistence,
-	},
-	{
-		name: "switch offline delivery",
-		test: testSwitchOfflineDelivery,
-	},
-	{
-		name: "switch offline delivery persistence",
-		test: testSwitchOfflineDeliveryPersistence,
-	},
-	{
-		name: "switch offline delivery outgoing offline",
-		test: testSwitchOfflineDeliveryOutgoingOffline,
-	},
-	{
-		// TODO(roasbeef): test always needs to be last as Bob's state
-		// is borked since we trick him into attempting to cheat Alice?
-		name: "revoked uncooperative close retribution",
-		test: testRevokedCloseRetribution,
-	},
-	{
-		name: "failing link",
-		test: testFailingChannel,
-	},
-	{
-		name: "garbage collect link nodes",
-		test: testGarbageCollectLinkNodes,
-	},
-	{
-		name: "revoked uncooperative close retribution zero value remote output",
-		test: testRevokedCloseRetributionZeroValueRemoteOutput,
-	},
-	{
-		name: "revoked uncooperative close retribution remote hodl",
-		test: testRevokedCloseRetributionRemoteHodl,
-	},
+	//	{
+	//		name: "onchain fund recovery",
+	//		test: testOnchainFundRecovery,
+	//	},
+	//	{
+	//		name: "basic funding flow",
+	//		test: testBasicChannelFunding,
+	//	},
+	//	{
+	//		name: "update channel policy",
+	//		test: testUpdateChannelPolicy,
+	//	},
+	//	{
+	//		name: "open channel reorg test",
+	//		test: testOpenChannelAfterReorg,
+	//	},
+	//	{
+	//		name: "disconnecting target peer",
+	//		test: testDisconnectingTargetPeer,
+	//	},
+	//	{
+	//		name: "graph topology notifications",
+	//		test: testGraphTopologyNotifications,
+	//	},
+	//	{
+	//		name: "funding flow persistence",
+	//		test: testChannelFundingPersistence,
+	//	},
+	//	{
+	//		name: "channel force closure",
+	//		test: testChannelForceClosure,
+	//	},
+	//	{
+	//		name: "channel balance",
+	//		test: testChannelBalance,
+	//	},
+	//	{
+	//		name: "single hop invoice",
+	//		test: testSingleHopInvoice,
+	//	},
+	//	{
+	//		name: "sphinx replay persistence",
+	//		test: testSphinxReplayPersistence,
+	//	},
+	//	{
+	//		name: "list outgoing payments",
+	//		test: testListPayments,
+	//	},
+	//	{
+	//		name: "max pending channel",
+	//		test: testMaxPendingChannels,
+	//	},
+	//	{
+	//		name: "multi-hop payments",
+	//		test: testMultiHopPayments,
+	//	},
+	//	{
+	//		name: "single-hop send to route",
+	//		test: testSingleHopSendToRoute,
+	//	},
+	//	{
+	//		name: "multi-hop send to route",
+	//		test: testMultiHopSendToRoute,
+	//	},
+	//	{
+	//		name: "send to route error propagation",
+	//		test: testSendToRouteErrorPropagation,
+	//	},
+	//	{
+	//		name: "private channels",
+	//		test: testPrivateChannels,
+	//	},
+	//	{
+	//		name: "invoice routing hints",
+	//		test: testInvoiceRoutingHints,
+	//	},
+	//	{
+	//		name: "multi-hop payments over private channels",
+	//		test: testMultiHopOverPrivateChannels,
+	//	},
+	//	{
+	//		name: "multiple channel creation",
+	//		test: testBasicChannelCreation,
+	//	},
+	//	{
+	//		name: "invoice update subscription",
+	//		test: testInvoiceSubscriptions,
+	//	},
+	//	{
+	//		name: "multi-hop htlc error propagation",
+	//		test: testHtlcErrorPropagation,
+	//	},
+	//	// TODO(roasbeef): multi-path integration test
+	//	{
+	//		name: "node announcement",
+	//		test: testNodeAnnouncement,
+	//	},
+	//	{
+	//		name: "node sign verify",
+	//		test: testNodeSignVerify,
+	//	},
+	//	{
+	//		name: "async payments benchmark",
+	//		test: testAsyncPayments,
+	//	},
+	//	{
+	//		name: "async bidirectional payments",
+	//		test: testBidirectionalAsyncPayments,
+	//	},
+	//	{
+	//		// bob: outgoing our commit timeout
+	//		// carol: incoming their commit watch and see timeout
+	//		name: "test multi-hop htlc local force close immediate expiry",
+	//		test: testMultiHopHtlcLocalTimeout,
+	//	},
+	//	{
+	//		// bob: outgoing watch and see, they sweep on chain
+	//		// carol: incoming our commit, know preimage
+	//		name: "test multi-hop htlc receiver chain claim",
+	//		test: testMultiHopReceiverChainClaim,
+	//	},
+	//	{
+	//		// bob: outgoing our commit watch and see timeout
+	//		// carol: incoming their commit watch and see timeout
+	//		name: "test multi-hop local force close on-chain htlc timeout",
+	//		test: testMultiHopLocalForceCloseOnChainHtlcTimeout,
+	//	},
+	//	{
+	//		// bob: outgoing their commit watch and see timeout
+	//		// carol: incoming our commit watch and see timeout
+	//		name: "test multi-hop remote force close on-chain htlc timeout",
+	//		test: testMultiHopRemoteForceCloseOnChainHtlcTimeout,
+	//	},
+	//	{
+	//		// bob: outgoing our commit watch and see, they sweep on chain
+	//		// bob: incoming our commit watch and learn preimage
+	//		// carol: incoming their commit know preimage
+	//		name: "test multi-hop htlc local chain claim",
+	//		test: testMultiHopHtlcLocalChainClaim,
+	//	},
+	//	{
+	//		// bob: outgoing their commit watch and see, they sweep on chain
+	//		// bob: incoming their commit watch and learn preimage
+	//		// carol: incoming our commit know preimage
+	//		name: "test multi-hop htlc remote chain claim",
+	//		test: testMultiHopHtlcRemoteChainClaim,
+	//	},
+	//	{
+	//		name: "switch circuit persistence",
+	//		test: testSwitchCircuitPersistence,
+	//	},
+	//	{
+	//		name: "switch offline delivery",
+	//		test: testSwitchOfflineDelivery,
+	//	},
+	//	{
+	//		name: "switch offline delivery persistence",
+	//		test: testSwitchOfflineDeliveryPersistence,
+	//	},
+	//	{
+	//		name: "switch offline delivery outgoing offline",
+	//		test: testSwitchOfflineDeliveryOutgoingOffline,
+	//	},
+	//	{
+	//		// TODO(roasbeef): test always needs to be last as Bob's state
+	//		// is borked since we trick him into attempting to cheat Alice?
+	//		name: "revoked uncooperative close retribution",
+	//		test: testRevokedCloseRetribution,
+	//	},
+	//	{
+	//		name: "failing link",
+	//		test: testFailingChannel,
+	//	},
+	//	{
+	//		name: "garbage collect link nodes",
+	//		test: testGarbageCollectLinkNodes,
+	//	},
+	//	{
+	//		name: "revoked uncooperative close retribution zero value remote output",
+	//		test: testRevokedCloseRetributionZeroValueRemoteOutput,
+	//	},
+	//	{
+	//		name: "revoked uncooperative close retribution remote hodl",
+	//		test: testRevokedCloseRetributionRemoteHodl,
+	//	},
 	{
 		name: "data loss protection",
 		test: testDataLossProtection,
