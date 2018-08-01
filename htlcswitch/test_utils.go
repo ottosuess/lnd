@@ -14,6 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/fastsha256"
 	"github.com/coreos/bbolt"
 	"github.com/go-errors/errors"
@@ -24,10 +28,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/shachain"
-	"github.com/btcsuite/btcd/btcec"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
+	"github.com/lightningnetwork/lnd/ticker"
 )
 
 var (
@@ -918,8 +919,8 @@ func newThreeHopNetwork(t testing.TB, aliceChannel, firstBobChannel,
 			ChainEvents:         &contractcourt.ChainEventSubscription{},
 			SyncStates:          true,
 			BatchSize:           10,
-			BatchTicker:         &mockTicker{time.NewTicker(batchTimeout).C},
-			FwdPkgGCTicker:      &mockTicker{time.NewTicker(fwdPkgTimeout).C},
+			BatchTicker:         ticker.MockNew(batchTimeout),
+			FwdPkgGCTicker:      ticker.MockNew(fwdPkgTimeout),
 			MinFeeUpdateTimeout: minFeeUpdateTimeout,
 			MaxFeeUpdateTimeout: maxFeeUpdateTimeout,
 			OnChannelFailure:    func(lnwire.ChannelID, lnwire.ShortChannelID, LinkFailureError) {},
@@ -961,8 +962,8 @@ func newThreeHopNetwork(t testing.TB, aliceChannel, firstBobChannel,
 			ChainEvents:         &contractcourt.ChainEventSubscription{},
 			SyncStates:          true,
 			BatchSize:           10,
-			BatchTicker:         &mockTicker{time.NewTicker(batchTimeout).C},
-			FwdPkgGCTicker:      &mockTicker{time.NewTicker(fwdPkgTimeout).C},
+			BatchTicker:         ticker.MockNew(batchTimeout),
+			FwdPkgGCTicker:      ticker.MockNew(fwdPkgTimeout),
 			MinFeeUpdateTimeout: minFeeUpdateTimeout,
 			MaxFeeUpdateTimeout: maxFeeUpdateTimeout,
 			OnChannelFailure:    func(lnwire.ChannelID, lnwire.ShortChannelID, LinkFailureError) {},
@@ -1004,8 +1005,8 @@ func newThreeHopNetwork(t testing.TB, aliceChannel, firstBobChannel,
 			ChainEvents:         &contractcourt.ChainEventSubscription{},
 			SyncStates:          true,
 			BatchSize:           10,
-			BatchTicker:         &mockTicker{time.NewTicker(batchTimeout).C},
-			FwdPkgGCTicker:      &mockTicker{time.NewTicker(fwdPkgTimeout).C},
+			BatchTicker:         ticker.MockNew(batchTimeout),
+			FwdPkgGCTicker:      ticker.MockNew(fwdPkgTimeout),
 			MinFeeUpdateTimeout: minFeeUpdateTimeout,
 			MaxFeeUpdateTimeout: maxFeeUpdateTimeout,
 			OnChannelFailure:    func(lnwire.ChannelID, lnwire.ShortChannelID, LinkFailureError) {},
@@ -1047,8 +1048,8 @@ func newThreeHopNetwork(t testing.TB, aliceChannel, firstBobChannel,
 			ChainEvents:         &contractcourt.ChainEventSubscription{},
 			SyncStates:          true,
 			BatchSize:           10,
-			BatchTicker:         &mockTicker{time.NewTicker(batchTimeout).C},
-			FwdPkgGCTicker:      &mockTicker{time.NewTicker(fwdPkgTimeout).C},
+			BatchTicker:         ticker.MockNew(batchTimeout),
+			FwdPkgGCTicker:      ticker.MockNew(fwdPkgTimeout),
 			MinFeeUpdateTimeout: minFeeUpdateTimeout,
 			MaxFeeUpdateTimeout: maxFeeUpdateTimeout,
 			OnChannelFailure:    func(lnwire.ChannelID, lnwire.ShortChannelID, LinkFailureError) {},
