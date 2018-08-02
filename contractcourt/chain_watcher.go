@@ -88,6 +88,8 @@ type chainWatcherConfig struct {
 	// isOurAddr is a function that returns true if the passed address is
 	// known to us.
 	isOurAddr func(btcutil.Address) bool
+
+	storeChanSyncMsg func() error
 }
 
 // chainWatcher is a system that's assigned to every active channel. The duty
@@ -298,6 +300,11 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 			return
 		}
 
+		//		if err := c.cfg.storeChanSyncMsg(); err != nil {
+		//			log.Warnf("unable to store channel sync message: %v",
+		//				err)
+		//		}
+
 		// If this is our commitment transaction, then we can
 		// exit here as we don't have any further processing we
 		// need to do (we can't cheat ourselves :p).
@@ -305,6 +312,10 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 		isOurCommitment := commitSpend.SpenderTxHash.IsEqual(
 			&commitmentHash,
 		)
+
+		// Here we should store our latest chan sync message such that
+		// 1. If we detect a remote close that is beyond what we know, we can resend i
+		// 2. If the remote has lost state, we can resend it
 		if isOurCommitment {
 			if err := c.dispatchLocalForceClose(
 				commitSpend, *localCommit,
@@ -406,6 +417,16 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 					"point for channel(%v) with lost "+
 					"state: %v",
 					c.cfg.chanState.FundingOutpoint, err)
+
+				// We were unable to retrieve the
+				// commit pointfrom the database. Try
+				// to fetch our latest channel sync
+				// message and attempt to get the point
+				// from the remote peer, if online.
+				// OR: just wait here. When trying to load a
+				// channel, we should be getting the commit
+				// point eventually, so it will be added to the
+				// db.
 				return
 			}
 
