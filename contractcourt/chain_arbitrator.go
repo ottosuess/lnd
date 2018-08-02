@@ -349,6 +349,32 @@ func (c *ChainArbitrator) Start() error {
 				contractBreach: func(retInfo *lnwallet.BreachRetribution) error {
 					return c.cfg.ContractBreach(chanPoint, retInfo)
 				},
+				storeChanSyncMsg: func() error {
+					// Fetch the ChannelReestablish message
+					// for our latest state, we will store
+					// this in case the remote has lost
+					// state and we need to resend it.
+					lnChan, err :=
+						lnwallet.NewLightningChannel(
+							c.cfg.Signer,
+							c.cfg.PreimageDB,
+							channel,
+						)
+					if err != nil {
+						return err
+					}
+					defer lnChan.Stop()
+
+					chanSyncMsg, err := lnChan.ChanSyncMsg()
+					if err != nil {
+						return err
+					}
+
+					return c.chanSource.PutChanSyncMsg(
+						channel.IdentityPub,
+						&channel.FundingOutpoint,
+						chanSyncMsg)
+				},
 			},
 		)
 		if err != nil {
@@ -619,6 +645,33 @@ func (c *ChainArbitrator) WatchNewChannel(newChan *channeldb.OpenChannel) error 
 			isOurAddr: c.cfg.IsOurAddress,
 			contractBreach: func(retInfo *lnwallet.BreachRetribution) error {
 				return c.cfg.ContractBreach(chanPoint, retInfo)
+			},
+			// TODO: remove dup
+			storeChanSyncMsg: func() error {
+				// Fetch the ChannelReestablish message
+				// for our latest state, we will store
+				// this in case the remote has lost
+				// state and we need to resend it.
+				lnChan, err :=
+					lnwallet.NewLightningChannel(
+						c.cfg.Signer,
+						c.cfg.PreimageDB,
+						newChan,
+					)
+				if err != nil {
+					return err
+				}
+				defer lnChan.Stop()
+
+				chanSyncMsg, err := lnChan.ChanSyncMsg()
+				if err != nil {
+					return err
+				}
+
+				return c.chanSource.PutChanSyncMsg(
+					newChan.IdentityPub,
+					&newChan.FundingOutpoint,
+					chanSyncMsg)
 			},
 		},
 	)
