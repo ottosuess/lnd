@@ -559,7 +559,12 @@ func (p *peer) addLink(chanPoint *wire.OutPoint,
 				*chanPoint, signals,
 			)
 		},
-		OnChannelFailure:    onChannelFailure,
+		OnChannelFailure: onChannelFailure,
+		StoreChanSyncMsg: func(msg *lnwire.ChannelReestablish) error {
+			return p.server.chanDB.PutChanSyncMsg(
+				p.addr.IdentityKey, chanPoint, msg,
+			)
+		},
 		SyncStates:          syncStates,
 		BatchTicker:         htlcswitch.NewBatchTicker(50 * time.Millisecond),
 		FwdPkgGCTicker:      htlcswitch.NewBatchTicker(time.Minute),
