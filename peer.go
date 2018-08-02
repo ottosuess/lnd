@@ -285,6 +285,23 @@ func (p *peer) Start() error {
 			"must be init message")
 	}
 
+	// If we have any channel sync messages stored after a channel sync
+	// failure, resend this message now.
+	//	chanSyncMsgs, err := p.server.chanDB.FetchChanSyncMsgs(p.addr.IdentityKey)
+	//	if err != nil {
+	//		peerLog.Errorf("unable to fetch chan sync messages "+
+	//			"for peer %v: %v", p, err)
+	//		return err
+	//	}
+	//
+	//	for _, msg := range chanSyncMsgs {
+	//		if err := p.SendMessage(true, msg); err != nil {
+	//			peerLog.Errorf("unable to send stored chan sync msgs "+
+	//				"to remote peer: %v", err)
+	//			return err
+	//		}
+	//	}
+
 	// Fetch and then load all the active channels we have with this remote
 	// peer from the database.
 	activeChans, err := p.server.chanDB.FetchOpenChannels(p.addr.IdentityKey)
