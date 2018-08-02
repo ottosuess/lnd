@@ -721,7 +721,7 @@ func (l *channelLink) resolveFwdPkg(fwdPkg *channeldb.FwdPkg) (bool, error) {
 func (l *channelLink) fwdPkgGarbager() {
 	defer l.wg.Done()
 
-	l.cfg.FwdPkgGCTicker.Resume()
+	l.cfg.FwdPkgGCTicker.Start()
 	defer l.cfg.FwdPkgGCTicker.Stop()
 
 	for {
@@ -957,7 +957,7 @@ out:
 			// here. We also disable the batch ticker from waking up
 			// the htlcManager while the batch is empty.
 			if l.batchCounter == 0 {
-				l.cfg.BatchTicker.Pause()
+				l.cfg.BatchTicker.Stop()
 				continue
 			}
 
@@ -986,8 +986,8 @@ out:
 			// If the downstream packet resulted in a non-empty
 			// batch, reinstate the batch ticker so that it can be
 			// cleared.
-			if l.batchCounter > 0 && !l.cfg.BatchTicker.IsActive() {
-				l.cfg.BatchTicker.Resume()
+			if l.batchCounter > 0 {
+				l.cfg.BatchTicker.Start()
 			}
 
 		// A message from the switch was just received. This indicates
@@ -1015,8 +1015,8 @@ out:
 			// If the downstream packet resulted in a non-empty
 			// batch, reinstate the batch ticker so that it can be
 			// cleared.
-			if l.batchCounter > 0 && !l.cfg.BatchTicker.IsActive() {
-				l.cfg.BatchTicker.Resume()
+			if l.batchCounter > 0 {
+				l.cfg.BatchTicker.Start()
 			}
 
 		// A message from the connected peer was just received. This

@@ -1477,7 +1477,7 @@ func newSingleLinkTestHarness(chanAmt, chanReserve btcutil.Amount) (
 
 	// Instantiate with a long interval, so that we can precisely control
 	// the firing via force feeding.
-	bticker := ticker.MockNew(time.Hour)
+	bticker := ticker.MockNew()
 	aliceCfg := ChannelLinkConfig{
 		FwrdingPolicy:      globalPolicy,
 		Peer:               alicePeer,
@@ -1500,7 +1500,7 @@ func newSingleLinkTestHarness(chanAmt, chanReserve btcutil.Amount) (
 		Registry:       invoiceRegistry,
 		ChainEvents:    &contractcourt.ChainEventSubscription{},
 		BatchTicker:    bticker,
-		FwdPkgGCTicker: ticker.MockNew(5 * time.Second),
+		FwdPkgGCTicker: ticker.New(5 * time.Second),
 		// Make the BatchSize and Min/MaxFeeUpdateTimeout large enough
 		// to not trigger commit updates automatically during tests.
 		BatchSize:           10000,
@@ -3869,7 +3869,7 @@ func restartLink(aliceChannel *lnwallet.LightningChannel, aliceSwitch *Switch,
 
 	// Instantiate with a long interval, so that we can precisely control
 	// the firing via force feeding.
-	bticker := ticker.MockNew(time.Hour)
+	bticker := ticker.MockNew()
 	aliceCfg := ChannelLinkConfig{
 		FwrdingPolicy:      globalPolicy,
 		Peer:               alicePeer,

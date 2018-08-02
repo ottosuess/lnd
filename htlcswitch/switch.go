@@ -1409,12 +1409,12 @@ func (s *Switch) htlcForwarder() {
 		totalSatSent    btcutil.Amount
 		totalSatRecv    btcutil.Amount
 	)
-	s.cfg.LogEventTicker.Resume()
+	s.cfg.LogEventTicker.Start()
 	defer s.cfg.LogEventTicker.Stop()
 
 	// Every 15 seconds, we'll flush out the forwarding events that
 	// occurred during that period.
-	s.cfg.FwdEventTicker.Resume()
+	s.cfg.FwdEventTicker.Start()
 	defer s.cfg.FwdEventTicker.Stop()
 
 out:
