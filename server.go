@@ -47,7 +47,7 @@ const (
 
 	// defaultBackoff is the starting point for exponential backoff for
 	// reconnecting to persistent peers.
-	defaultBackoff = time.Second
+	defaultBackoff = 5 * time.Second
 
 	// maximumBackoff is the largest backoff we will permit when
 	// reattempting connections to persistent peers.
