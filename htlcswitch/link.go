@@ -207,8 +207,6 @@ type ChannelLinkConfig struct {
 	// been closed, or when the set of active HTLC's is updated.
 	UpdateContractSignals func(*contractcourt.ContractSignals) error
 
-	StoreChanSyncMsg func(*lnwire.ChannelReestablish) error
-
 	// ChainEvents is an active subscription to the chain watcher for this
 	// channel to be notified of any on-chain activity related to this
 	// channel.

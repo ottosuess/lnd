@@ -300,10 +300,11 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 			return
 		}
 
-		//		if err := c.cfg.storeChanSyncMsg(); err != nil {
-		//			log.Warnf("unable to store channel sync message: %v",
-		//				err)
-		//		}
+		log.Warnf("johan storing chan sync message")
+		if err := c.cfg.storeChanSyncMsg(); err != nil {
+			log.Warnf("johan unable to store channel sync message: %v",
+				err)
+		}
 
 		// If this is our commitment transaction, then we can
 		// exit here as we don't have any further processing we
@@ -427,6 +428,14 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 				// channel, we should be getting the commit
 				// point eventually, so it will be added to the
 				// db.
+				// notify when peer is online, send chan sync
+				// message, and wait for answer. How to wait
+				// for answer? Either just pipe the anwer back
+				// here somehow, or continuously check the db.
+				// Must also figure out how to store to the DB,
+				// as currently it is stored if channel desync
+				// is detected. Could also trigger a regular
+				// channel sync from here.
 				return
 			}
 

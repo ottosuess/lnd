@@ -559,12 +559,7 @@ func (p *peer) addLink(chanPoint *wire.OutPoint,
 				*chanPoint, signals,
 			)
 		},
-		OnChannelFailure: onChannelFailure,
-		StoreChanSyncMsg: func(msg *lnwire.ChannelReestablish) error {
-			return p.server.chanDB.PutChanSyncMsg(
-				p.addr.IdentityKey, chanPoint, msg,
-			)
-		},
+		OnChannelFailure:    onChannelFailure,
 		SyncStates:          syncStates,
 		BatchTicker:         htlcswitch.NewBatchTicker(50 * time.Millisecond),
 		FwdPkgGCTicker:      htlcswitch.NewBatchTicker(time.Minute),
@@ -824,6 +819,9 @@ func newChanMsgStream(p *peer, cid lnwire.ChannelID) *msgStream {
 				// channel update message, but we haven't yet
 				// sent the channel to the channelManager.
 				p.server.fundingMgr.waitUntilChannelOpen(cid)
+			} else {
+
+				peerLog.Infof("johan got chan sync message")
 			}
 
 			// TODO(roasbeef): only wait if not chan sync
@@ -839,21 +837,21 @@ func newChanMsgStream(p *peer, cid lnwire.ChannelID) *msgStream {
 				// try to resend our last channel sync message,
 				// such that the peer can recover funds from
 				// the closes channel.
-				//				if err != nil && isChanSyncMsg {
-				//					peerLog.Infof("unable to find "+
-				//						"link(%v) to handle channel "+
-				//						"sync, attempting to resend "+
-				//						"last ChanSync message", cid)
-				//					err := p.resendChanSyncMsg(cid)
-				//					if err != nil {
-				//						peerLog.Errorf(
-				//							"resend failed: %v",
-				//							err,
-				//						)
-				//						return
-				//					}
-				//					return
-				//				}
+				if err != nil && isChanSyncMsg {
+					peerLog.Infof("johan unable to find "+
+						"link(%v) to handle channel "+
+						"sync, attempting to resend "+
+						"last ChanSync message", cid)
+					err := p.resendChanSyncMsg(cid)
+					if err != nil {
+						peerLog.Errorf(
+							"resend failed: %v",
+							err,
+						)
+						return
+					}
+					return
+				}
 				if err != nil {
 					peerLog.Errorf("recv'd update for "+
 						"unknown channel %v from %v: "+
@@ -905,7 +903,7 @@ func (p *peer) resendChanSyncMsg(cid lnwire.ChannelID) error {
 				"message to peer %v: %v", p, err)
 		}
 
-		peerLog.Infof("Re-sent channel sync message for channel %v "+
+		peerLog.Infof("johan Re-sent channel sync message for channel %v "+
 			"to peer %v", cid, p)
 		break
 	}

@@ -678,7 +678,7 @@ func putChanSyncMsg(tx *bolt.Tx, peerKey *btcec.PublicKey,
 	}
 
 	var b bytes.Buffer
-	if err := WriteElement(&b, msg); err != nil {
+	if err := msg.Encode(&b, 0); err != nil {
 		return err
 	}
 
