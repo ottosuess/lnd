@@ -207,6 +207,8 @@ type ChannelLinkConfig struct {
 	// been closed, or when the set of active HTLC's is updated.
 	UpdateContractSignals func(*contractcourt.ContractSignals) error
 
+	StoreChanSyncMsg func(*lnwire.ChannelReestablish) error
+
 	// ChainEvents is an active subscription to the chain watcher for this
 	// channel to be notified of any on-chain activity related to this
 	// channel.
@@ -824,9 +826,6 @@ func (l *channelLink) htlcManager() {
 			// We failed syncing the commit chains, probably
 			// because the remote has lost state. We should force
 			// close the channel.
-			// TODO(halseth): store sent chanSync message to
-			// database, such that it can be resent to peer in case
-			// it tries to sync the channel again.
 			case err == lnwallet.ErrCommitSyncRemoteDataLoss:
 				fallthrough
 
