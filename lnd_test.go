@@ -6403,6 +6403,41 @@ func testDataLossProtection(net *lntest.NetworkHarness, t *harnessTest) {
 
 	assertNodeNumChannels(t, ctxb, dave, 0, false)
 	assertNodeNumChannels(t, ctxb, carol, 0, false)
+
+	restartDave, chanPoint2, daveStartingBalance, err := timeTravel(dave)
+	if err != nil {
+		t.Fatalf("unable to time travel eve: %v", err)
+	}
+
+	carolBalResp, err = carol.WalletBalance(ctxb, balReq)
+	if err != nil {
+		t.Fatalf("unable to get carol's balance: %v", err)
+	}
+	carolStartingBalance = carolBalResp.ConfirmedBalance
+
+	// Now let Carol force close the channel
+	ctxt, _ = context.WithTimeout(ctxb, timeout)
+	closeChannelAndAssert(ctxt, t, net, carol, chanPoint2, true)
+
+	//	mineBlocks(t, net, 5)
+
+	// When Eve comes online, she will try to resync the channel, but it
+	// will already be closed. Carol should resend the information Eve
+	// needs to sweep her funds.
+	if err := restartDave(); err != nil {
+		t.Fatalf("unabel to restart Eve: %v", err)
+	}
+
+	if err := net.ConnectNodes(ctxb, carol, dave); err != nil {
+		t.Fatalf("unable to connect dave to carol: %v", err)
+	}
+
+	// Eve should sweep here funds.
+	_, err = waitForTxInMempool(net.Miner.Node, 15*time.Second)
+	if err != nil {
+		t.Fatalf("unable to find Eve's sweep tx in mempool: %v", err)
+	}
+	fmt.Println(daveStartingBalance)
 }
 
 // assertNodeNumChannels polls the provided node's list channels rpc until it
