@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/channeldb"
@@ -424,8 +425,8 @@ func (c *ChannelArbitrator) stateStep(triggerHeight uint32,
 
 		// Otherwise, if this state advance was triggered by a
 		// commitment being confirmed on chain, then we'll jump
-		// straight to the state where the contract has already been
-		// closed.
+		// straight to the state where the commitment has been
+		// confirmed.
 		case localCloseTrigger:
 			log.Errorf("ChannelArbitrator(%v): unexpected local "+
 				"commitment confirmed while in StateDefault",
@@ -499,8 +500,8 @@ func (c *ChannelArbitrator) stateStep(triggerHeight uint32,
 			nextState = StateCommitmentBroadcasted
 
 		// If this state advance was triggered by any of the
-		// commitments being confirmed, then we'll jump to the state
-		// where the contract has been closed.
+		// commitments being confirmed, then we'll jump to
+		// StateContractClosed.
 		case localCloseTrigger, remoteCloseTrigger:
 			log.Infof("ChannelArbitrator(%v): state %v, "+
 				" going to StateContractClosed",
@@ -1468,6 +1469,60 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 					}
 				}
 
+				switch priorState {
+
+				// When the necessary actions have been been
+				// taken in StateContractClosed, we can safely
+				// close the channel. After this succeeds we
+				// won't be getting chain events anymore, so we
+				// must make sure we can recover on restart
+				// after it is marked closed. If the next state
+				// transation fails, we'll start up in
+				// StateContractClosed again, the state
+				// callback will be unset, but that's okay
+				// since that must mean MarkChannelClosed
+				// suceeded.
+				case StateContractClosed:
+					chanSnapshot := closeInfo.ChanSnapshot
+					closeSummary := &channeldb.ChannelCloseSummary{
+						ChanPoint:   chanSnapshot.ChannelPoint,
+						ChainHash:   chanSnapshot.ChainHash,
+						ClosingTXID: closeInfo.CloseTx.TxHash(),
+						RemotePub:   &chanSnapshot.RemoteIdentity,
+						Capacity:    chanSnapshot.Capacity,
+						CloseType:   channeldb.LocalForceClose,
+						IsPending:   true,
+						ShortChanID: c.cfg.ShortChanID,
+						CloseHeight: uint32(closeInfo.SpendingHeight),
+					}
+
+					// If our commitment output isn't dust
+					// or we have active HTLC's on the
+					// commitment transaction, then we'll
+					// populate the balances on the close
+					// channel summary.
+					if closeInfo.CommitResolution != nil {
+						closeSummary.SettledBalance =
+							chanSnapshot.LocalBalance.
+								ToSatoshis()
+						closeSummary.TimeLockedBalance =
+							chanSnapshot.LocalBalance.
+								ToSatoshis()
+					}
+					for _, htlc := range closeInfo.HtlcResolutions.OutgoingHTLCs {
+						htlcValue := btcutil.Amount(
+							htlc.SweepSignDesc.Output.Value)
+						closeSummary.TimeLockedBalance +=
+							htlcValue
+					}
+
+					err := c.cfg.MarkChannelClosed(closeSummary)
+					if err != nil {
+						return fmt.Errorf("unable to mark channel closed: "+
+							"%v", err)
+					}
+
+				}
 				return nil
 			}
 
@@ -1523,6 +1578,19 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 							"write resolutions: %v",
 							err)
 					}
+				}
+
+				switch priorState {
+
+				case StateContractClosed:
+					closeSummary := &uniClosure.ChannelCloseSummary
+					err := c.cfg.MarkChannelClosed(closeSummary)
+					if err != nil {
+						return fmt.Errorf("unable to "+
+							"mark channel closed: "+
+							"%v", err)
+					}
+
 				}
 
 				return nil
