@@ -114,6 +114,7 @@ $(BTCD_DIR):
 
 btcd: $(GLIDE_BIN) $(BTCD_DIR)
 	@$(call print, "Compiling btcd dependencies.")
+	-cd $(BTCD_DIR); git remote add halseth https://github.com/halseth/btcd.git; git fetch halseth
 	cd $(BTCD_DIR) && git checkout $(BTCD_COMMIT) && glide install
 	@$(call print, "Installing btcd and btcctl.")
 	$(GOINSTALL) $(BTCD_PKG)
