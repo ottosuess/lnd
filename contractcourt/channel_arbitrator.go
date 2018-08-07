@@ -640,7 +640,7 @@ func (c *ChannelArbitrator) stateStep(triggerHeight uint32,
 // param is a callback that allows the caller to execute an arbitrary action
 // after each state transition.
 func (c *ChannelArbitrator) advanceState(triggerHeight uint32,
-	trigger transitionTrigger, stateCallback func(ArbitratorState) error) (
+	trigger transitionTrigger, stateCallback func(ArbitratorState, ArbitratorState) error) (
 	ArbitratorState, *wire.MsgTx, error) {
 
 	var (
@@ -673,7 +673,7 @@ func (c *ChannelArbitrator) advanceState(triggerHeight uint32,
 		// it. If the callback doesn't execute successfully, then we'll
 		// exit early.
 		if stateCallback != nil {
-			if err := stateCallback(nextState); err != nil {
+			if err := stateCallback(priorState, nextState); err != nil {
 				log.Errorf("ChannelArbitrator(%v): unable to "+
 					"execute state callback: %v",
 					c.cfg.ChanPoint, err)
@@ -1447,7 +1447,7 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 				HtlcResolutions:  *closeInfo.HtlcResolutions,
 			}
 
-			stateCb := func(nextState ArbitratorState) error {
+			stateCb := func(priorState, nextState ArbitratorState) error {
 
 				switch nextState {
 
@@ -1504,7 +1504,7 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 			// present on their commitment.
 			c.activeHTLCs = newHtlcSet(uniClosure.RemoteCommit.Htlcs)
 
-			stateCb := func(nextState ArbitratorState) error {
+			stateCb := func(priorState, nextState ArbitratorState) error {
 
 				switch nextState {
 
