@@ -103,6 +103,9 @@ type ChannelArbitratorConfig struct {
 	// TODO(roasbeef): need RPC's to combine for pendingchannels RPC
 	MarkChannelResolved func() error
 
+	// only used for testing.
+	onStateChanged func(newState ArbitratorState)
+
 	ChainArbitratorConfig
 }
 
@@ -678,6 +681,11 @@ func (c *ChannelArbitrator) advanceState(triggerHeight uint32,
 			log.Tracef("ChannelArbitrator(%v): terminating at state=%v",
 				c.cfg.ChanPoint, nextState)
 			return nextState, forceCloseTx, nil
+		}
+
+		// Log the new state in test environments.
+		if c.cfg.onStateChanged != nil {
+			c.cfg.onStateChanged(nextState)
 		}
 	}
 }
