@@ -31,7 +31,8 @@ func (*mockChainIO) GetBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, error) 
 	return nil, nil
 }
 
-func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{}, func(), error) {
+func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{},
+	chan ArbitratorState, func(), error) {
 	blockEpoch := &chainntnfs.BlockEpochEvent{
 		Cancel: func() {},
 	}
@@ -56,6 +57,7 @@ func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{}, func(), e
 	// We'll use the resolvedChan to synchronize on call to
 	// MarkChannelResolved.
 	resolvedChan := make(chan struct{}, 1)
+	newStateChan := make(chan ArbitratorState)
 
 	// Next we'll create the matching configuration struct that contains
 	// all interfaces and methods the arbitrator needs to do its job.
@@ -80,17 +82,20 @@ func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{}, func(), e
 
 		ChainArbitratorConfig: chainArbCfg,
 		ChainEvents:           chanEvents,
+		onStateChanged: func(newState ArbitratorState) {
+			newStateChan <- newState
+		},
 	}
 	testLog, cleanUp, err := newTestBoltArbLog(
 		testChainHash, testChanPoint1,
 	)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("unable to create test log: %v",
+		return nil, nil, nil, nil, fmt.Errorf("unable to create test log: %v",
 			err)
 	}
 
 	return NewChannelArbitrator(arbCfg, nil, testLog),
-		resolvedChan, cleanUp, nil
+		resolvedChan, newStateChan, cleanUp, nil
 }
 
 // assertState checks that the ChannelArbitrator is in the state we expect it
@@ -104,7 +109,7 @@ func assertState(t *testing.T, c *ChannelArbitrator, expected ArbitratorState) {
 // TestChannelArbitratorCooperativeClose tests that the ChannelArbitertor
 // correctly does nothing in case a cooperative close is confirmed.
 func TestChannelArbitratorCooperativeClose(t *testing.T) {
-	chanArb, _, cleanUp, err := createTestChannelArbitrator()
+	chanArb, _, _, cleanUp, err := createTestChannelArbitrator()
 	if err != nil {
 		t.Fatalf("unable to create ChannelArbitrator: %v", err)
 	}
@@ -124,11 +129,28 @@ func TestChannelArbitratorCooperativeClose(t *testing.T) {
 	assertState(t, chanArb, StateDefault)
 }
 
+func assertStateTransitions(t *testing.T, newStates <-chan ArbitratorState,
+	expectedStates ...ArbitratorState) {
+
+	for _, exp := range expectedStates {
+		var state ArbitratorState
+		select {
+		case state = <-newStates:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("new state not received")
+		}
+
+		if state != exp {
+			t.Fatalf("expected new state %v, got %v", exp, state)
+		}
+	}
+}
+
 // TestChannelArbitratorRemoteForceClose checks that the ChannelArbitrotor goes
 // through the expected states if a remote force close is observed in the
 // chain.
 func TestChannelArbitratorRemoteForceClose(t *testing.T) {
-	chanArb, resolved, cleanUp, err := createTestChannelArbitrator()
+	chanArb, resolved, newStates, cleanUp, err := createTestChannelArbitrator()
 	if err != nil {
 		t.Fatalf("unable to create ChannelArbitrator: %v", err)
 	}
@@ -153,24 +175,26 @@ func TestChannelArbitratorRemoteForceClose(t *testing.T) {
 	}
 	chanArb.cfg.ChainEvents.RemoteUnilateralClosure <- uniClose
 
-	// It should mark the channel as resolved.
+	// It should transition StateDefault -> StateContractClosed ->
+	// StateFullyResolved.
+	assertStateTransitions(
+		t, newStates, StateContractClosed, StateFullyResolved,
+	)
+
+	// It should alos mark the channel as resolved.
 	select {
 	case <-resolved:
 		// Expected.
 	case <-time.After(5 * time.Second):
 		t.Fatalf("contract was not resolved")
 	}
-
-	// TODO: intermediate states.
-	// We expect the ChannelArbitrator to end up in the the resolved state.
-	assertState(t, chanArb, StateFullyResolved)
 }
 
 // TestChannelArbitratorLocalForceClose tests that the ChannelArbitrator goes
 // through the expected states in case we request it to force close the channel,
 // and the local force close event is observed in chain.
 func TestChannelArbitratorLocalForceClose(t *testing.T) {
-	chanArb, resolved, cleanUp, err := createTestChannelArbitrator()
+	chanArb, resolved, newStates, cleanUp, err := createTestChannelArbitrator()
 	if err != nil {
 		t.Fatalf("unable to create ChannelArbitrator: %v", err)
 	}
@@ -208,6 +232,9 @@ func TestChannelArbitratorLocalForceClose(t *testing.T) {
 		closeTx: respChan,
 	}
 
+	// It should transition to StateBroadcastCommit.
+	assertStateTransitions(t, newStates, StateBroadcastCommit)
+
 	// When it is broadcasting the force close, its state should be
 	// StateBroadcastCommit.
 	select {
@@ -218,6 +245,10 @@ func TestChannelArbitratorLocalForceClose(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatalf("did not get state update")
 	}
+
+	// After broadcasting, transition should be to
+	// StateCommitmentBroadcasted.
+	assertStateTransitions(t, newStates, StateCommitmentBroadcasted)
 
 	select {
 	case <-respChan:
@@ -239,24 +270,25 @@ func TestChannelArbitratorLocalForceClose(t *testing.T) {
 			HtlcResolutions: &lnwallet.HtlcResolutions{},
 		},
 	}
-	// It should mark the channel as resolved.
+
+	// It should transition StateContractClosed -> StateFullyResolved.
+	assertStateTransitions(t, newStates, StateContractClosed,
+		StateFullyResolved)
+
+	// It should also mark the channel as resolved.
 	select {
 	case <-resolved:
 		// Expected.
 	case <-time.After(5 * time.Second):
 		t.Fatalf("contract was not resolved")
 	}
-
-	// And end up in the StateFullyResolved state.
-	// TODO: intermediate states as well.
-	assertState(t, chanArb, StateFullyResolved)
 }
 
 // TestChannelArbitratorLocalForceCloseRemoteConfiremd tests that the
 // ChannelArbitrator behaves as expected in the case where we request a local
 // force close, but a remote commitment ends up being confirmed in chain.
 func TestChannelArbitratorLocalForceCloseRemoteConfirmed(t *testing.T) {
-	chanArb, resolved, cleanUp, err := createTestChannelArbitrator()
+	chanArb, resolved, newStates, cleanUp, err := createTestChannelArbitrator()
 	if err != nil {
 		t.Fatalf("unable to create ChannelArbitrator: %v", err)
 	}
@@ -294,6 +326,9 @@ func TestChannelArbitratorLocalForceCloseRemoteConfirmed(t *testing.T) {
 		closeTx: respChan,
 	}
 
+	// It should transition to StateBroadcastCommit.
+	assertStateTransitions(t, newStates, StateBroadcastCommit)
+
 	// We expect it to be in state StateBroadcastCommit when publishing
 	// the force close.
 	select {
@@ -304,6 +339,10 @@ func TestChannelArbitratorLocalForceCloseRemoteConfirmed(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatalf("no state update received")
 	}
+
+	// After broadcasting, transition should be to
+	// StateCommitmentBroadcasted.
+	assertStateTransitions(t, newStates, StateCommitmentBroadcasted)
 
 	// Wait for a response to the force close.
 	select {
@@ -327,6 +366,10 @@ func TestChannelArbitratorLocalForceCloseRemoteConfirmed(t *testing.T) {
 	}
 	chanArb.cfg.ChainEvents.RemoteUnilateralClosure <- uniClose
 
+	// It should transition StateContractClosed -> StateFullyResolved.
+	assertStateTransitions(t, newStates, StateContractClosed,
+		StateFullyResolved)
+
 	// It should resolve.
 	select {
 	case <-resolved:
@@ -334,10 +377,6 @@ func TestChannelArbitratorLocalForceCloseRemoteConfirmed(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatalf("contract was not resolved")
 	}
-
-	// And we expect it to end up in StateFullyResolved.
-	// TODO: intermediate states as well.
-	assertState(t, chanArb, StateFullyResolved)
 }
 
 // TestChannelArbitratorLocalForceCloseDoubleSpend tests that the
@@ -345,7 +384,7 @@ func TestChannelArbitratorLocalForceCloseRemoteConfirmed(t *testing.T) {
 // force close, but we fail broadcasting our commitment because a remote
 // commitment has already been published.
 func TestChannelArbitratorLocalForceDoubleSpend(t *testing.T) {
-	chanArb, resolved, cleanUp, err := createTestChannelArbitrator()
+	chanArb, resolved, newStates, cleanUp, err := createTestChannelArbitrator()
 	if err != nil {
 		t.Fatalf("unable to create ChannelArbitrator: %v", err)
 	}
@@ -382,6 +421,9 @@ func TestChannelArbitratorLocalForceDoubleSpend(t *testing.T) {
 		closeTx: respChan,
 	}
 
+	// It should transition to StateBroadcastCommit.
+	assertStateTransitions(t, newStates, StateBroadcastCommit)
+
 	// We expect it to be in state StateBroadcastCommit when publishing
 	// the force close.
 	select {
@@ -392,6 +434,10 @@ func TestChannelArbitratorLocalForceDoubleSpend(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatalf("no state update received")
 	}
+
+	// After broadcasting, transition should be to
+	// StateCommitmentBroadcasted.
+	assertStateTransitions(t, newStates, StateCommitmentBroadcasted)
 
 	// Wait for a response to the force close.
 	select {
@@ -415,6 +461,10 @@ func TestChannelArbitratorLocalForceDoubleSpend(t *testing.T) {
 	}
 	chanArb.cfg.ChainEvents.RemoteUnilateralClosure <- uniClose
 
+	// It should transition StateContractClosed -> StateFullyResolved.
+	assertStateTransitions(t, newStates, StateContractClosed,
+		StateFullyResolved)
+
 	// It should resolve.
 	select {
 	case <-resolved:
@@ -422,8 +472,4 @@ func TestChannelArbitratorLocalForceDoubleSpend(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatalf("contract was not resolved")
 	}
-
-	// And we expect it to end up in StateFullyResolved.
-	// TODO: intermediate states as well.
-	assertState(t, chanArb, StateFullyResolved)
 }
