@@ -79,7 +79,9 @@ func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{},
 		MarkCommitmentBroadcasted: func() error {
 			return nil
 		},
-
+		MarkChannelClosed: func(*channeldb.ChannelCloseSummary) error {
+			return nil
+		},
 		ChainArbitratorConfig: chainArbCfg,
 		ChainEvents:           chanEvents,
 		onStateChanged: func(newState ArbitratorState) {
