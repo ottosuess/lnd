@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/channeldb"
@@ -1450,6 +1451,53 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 					err)
 			}
 
+			// After the set of resolutions are successfully
+			// logged, we can safely close the channel. After this
+			// succeeds we won't be getting chain events anymore,
+			// so we must make sure we can recover on restart after
+			// it is marked closed. If the next state transation
+			// fails, we'll start up in the prior state again, and
+			// we won't be longer getting chain events. In this
+			// case we must manually re-trigger the state
+			// transition into StateContractClosed based on the
+			// close status of the channel.
+			chanSnapshot := closeInfo.ChanSnapshot
+			closeSummary := &channeldb.ChannelCloseSummary{
+				ChanPoint:   chanSnapshot.ChannelPoint,
+				ChainHash:   chanSnapshot.ChainHash,
+				ClosingTXID: closeInfo.CloseTx.TxHash(),
+				RemotePub:   &chanSnapshot.RemoteIdentity,
+				Capacity:    chanSnapshot.Capacity,
+				CloseType:   channeldb.LocalForceClose,
+				IsPending:   true,
+				ShortChanID: c.cfg.ShortChanID,
+				CloseHeight: uint32(closeInfo.SpendingHeight),
+			}
+
+			// If our commitment output isn't dust or we have
+			// active HTLC's on the commitment transaction, then
+			// we'll populate the balances on the close channel
+			// summary.
+			if closeInfo.CommitResolution != nil {
+				closeSummary.SettledBalance =
+					chanSnapshot.LocalBalance.ToSatoshis()
+				closeSummary.TimeLockedBalance =
+					chanSnapshot.LocalBalance.ToSatoshis()
+			}
+			for _, htlc := range closeInfo.HtlcResolutions.OutgoingHTLCs {
+				htlcValue := btcutil.Amount(
+					htlc.SweepSignDesc.Output.Value)
+				closeSummary.TimeLockedBalance += htlcValue
+			}
+
+			err = c.cfg.MarkChannelClosed(closeSummary)
+			if err != nil {
+				log.Errorf("unable to mark "+
+					"channel closed: %v", err)
+				// TODO: return or not
+				return
+			}
+
 			// We'll now advance our state machine until it reaches
 			// a terminal state.
 			_, _, err = c.advanceState(
@@ -1492,6 +1540,25 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 				log.Errorf("unable to write resolutions: %v",
 					err)
 				// TODO: to return or to not return
+			}
+
+			// After the set of resolutions are successfully
+			// logged, we can safely close the channel. After this
+			// succeeds we won't be getting chain events anymore,
+			// so we must make sure we can recover on restart after
+			// it is marked closed. If the next state transation
+			// fails, we'll start up in the prior state again, and
+			// we won't be longer getting chain events. In this
+			// case we must manually re-trigger the state
+			// transition into StateContractClosed based on the
+			// close status of the channel.
+			closeSummary := &uniClosure.ChannelCloseSummary
+			err = c.cfg.MarkChannelClosed(closeSummary)
+			if err != nil {
+				log.Errorf("unable to mark channel closed: %v",
+					err)
+				// TODO: to return or to not return
+				return
 			}
 
 			// We'll now advance our state machine until it reaches
