@@ -8,6 +8,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/lightningnetwork/lnd/chainntnfs"
+	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
 )
@@ -42,7 +43,7 @@ func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{},
 	chanEvents := &ChainEventSubscription{
 		RemoteUnilateralClosure: make(chan *lnwallet.UnilateralCloseSummary, 1),
 		LocalUnilateralClosure:  make(chan *LocalUnilateralCloseInfo, 1),
-		CooperativeClosure:      make(chan struct{}, 1),
+		CooperativeClosure:      make(chan *CooperativeCloseInfo, 1),
 		ContractBreach:          make(chan *lnwallet.BreachRetribution, 1),
 	}
 
@@ -81,6 +82,9 @@ func createTestChannelArbitrator() (*ChannelArbitrator, chan struct{},
 		},
 		MarkChannelClosed: func(*channeldb.ChannelCloseSummary) error {
 			return nil
+		},
+		IsPendingClose: func() (bool, channeldb.ClosureType, error) {
+			return false, 0, nil
 		},
 		ChainArbitratorConfig: chainArbCfg,
 		ChainEvents:           chanEvents,
@@ -125,9 +129,16 @@ func TestChannelArbitratorCooperativeClose(t *testing.T) {
 	// It should start out in the default state.
 	assertState(t, chanArb, StateDefault)
 
+	commitSpend := &chainntnfs.SpendDetail{
+		SpenderTxHash: &chainhash.Hash{},
+	}
+
 	// Cooperative close should do nothing.
 	// TODO: this will change?
-	chanArb.cfg.ChainEvents.CooperativeClosure <- struct{}{}
+	closeInfo := &CooperativeCloseInfo{
+		SpendDetail: commitSpend,
+	}
+	chanArb.cfg.ChainEvents.CooperativeClosure <- closeInfo
 	assertState(t, chanArb, StateDefault)
 }
 
