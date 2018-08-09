@@ -1680,8 +1680,11 @@ func (p *peer) fetchActiveChanCloser(chanID lnwire.ChannelID) (*channelCloser, e
 				channel:           channel,
 				unregisterChannel: p.server.htlcSwitch.RemoveLink,
 				broadcastTx:       p.server.cc.wallet.PublishTransaction,
-				disableChannel:    p.server.disableChannel,
-				quit:              p.quit,
+				disableChannel: func(op wire.OutPoint) error {
+					return p.server.announceChanStatus(op,
+						true)
+				},
+				quit: p.quit,
 			},
 			deliveryAddr,
 			feePerKw,
@@ -1740,8 +1743,11 @@ func (p *peer) handleLocalCloseReq(req *htlcswitch.ChanClose) {
 				channel:           channel,
 				unregisterChannel: p.server.htlcSwitch.RemoveLink,
 				broadcastTx:       p.server.cc.wallet.PublishTransaction,
-				disableChannel:    p.server.disableChannel,
-				quit:              p.quit,
+				disableChannel: func(op wire.OutPoint) error {
+					return p.server.announceChanStatus(op,
+						true)
+				},
+				quit: p.quit,
 			},
 			deliveryAddr,
 			req.TargetFeePerKw,
