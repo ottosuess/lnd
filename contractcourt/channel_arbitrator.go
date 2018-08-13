@@ -1449,6 +1449,15 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 				return
 			}
 
+			// To clean up, we ensure we commit to StateFullyResolved.
+			c.state = StateFullyResolved
+			if err := c.log.CommitState(c.state); err != nil {
+				log.Warnf("ChannelArbitrator(%v): unable to commit "+
+					"state(%v): %v", c.cfg.ChanPoint,
+					c.state, err)
+				return
+			}
+
 			log.Infof("ChannelPoint(%v) is fully closed, at "+
 				"height: %v", c.cfg.ChanPoint,
 				closeInfo.SpendingHeight)
