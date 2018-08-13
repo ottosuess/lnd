@@ -150,6 +150,9 @@ func createTestChannelArbitrator(log ArbitratorLog) (*ChannelArbitrator,
 		MarkChannelClosed: func(*channeldb.ChannelCloseSummary) error {
 			return nil
 		},
+		IsPendingClose: func() (bool, channeldb.ClosureType, error) {
+			return false, 0, nil
+		},
 		ChainArbitratorConfig: chainArbCfg,
 		ChainEvents:           chanEvents,
 	}
