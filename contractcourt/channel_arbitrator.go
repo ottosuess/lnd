@@ -260,7 +260,7 @@ func (c *ChannelArbitrator) Start() error {
 	}
 
 	// Check the database for the close status of this channel.
-	isClosing, closeType, err := c.cfg.IsPendingClose()
+	isClosing, closeHeight, closeType, err := c.cfg.IsPendingClose()
 	if err != nil {
 		c.cfg.BlockEpochs.Cancel()
 		return err
@@ -272,6 +272,7 @@ func (c *ChannelArbitrator) Start() error {
 	// try to recover from this by manually advancing the state by setting
 	// the corresponding close trigger.
 	trigger := chainTrigger
+	triggerHeight := uint32(bestHeight)
 	if isClosing {
 		switch c.state {
 		case StateDefault:
@@ -285,6 +286,7 @@ func (c *ChannelArbitrator) Start() error {
 			case channeldb.RemoteForceClose:
 				trigger = remoteCloseTrigger
 			}
+			triggerHeight = closeHeight
 
 			log.Warnf("ChannelArbitrator(%v): detected stalled "+
 				"state=%v for closed channel, using "+
@@ -295,9 +297,7 @@ func (c *ChannelArbitrator) Start() error {
 	// We'll now attempt to advance our state forward based on the current
 	// on-chain state, and our set of active contracts.
 	startingState := c.state
-	nextState, _, err := c.advanceState(
-		uint32(bestHeight), trigger,
-	)
+	nextState, _, err := c.advanceState(triggerHeight, trigger)
 	if err != nil {
 		c.cfg.BlockEpochs.Cancel()
 		return err
