@@ -156,8 +156,8 @@ func createTestChannelArbitrator(log ArbitratorLog) (*ChannelArbitrator,
 		MarkChannelClosed: func(*channeldb.ChannelCloseSummary) error {
 			return nil
 		},
-		IsPendingClose: func() (bool, channeldb.ClosureType, error) {
-			return false, 0, nil
+		IsPendingClose: func() (bool, uint32, channeldb.ClosureType, error) {
+			return false, 0, 0, nil
 		},
 		ChainArbitratorConfig: chainArbCfg,
 		ChainEvents:           chanEvents,
@@ -808,8 +808,9 @@ func TestChannelArbitratorCommitFailure(t *testing.T) {
 	}
 
 	log.failCommit = false
-	chanArb.cfg.IsPendingClose = func() (bool, channeldb.ClosureType, error) {
-		return true, channeldb.RemoteForceClose, nil
+	chanArb.cfg.IsPendingClose = func() (bool, uint32,
+		channeldb.ClosureType, error) {
+		return true, 100, channeldb.RemoteForceClose, nil
 	}
 
 	if err := chanArb.Start(); err != nil {
