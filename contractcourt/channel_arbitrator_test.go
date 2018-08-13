@@ -138,7 +138,9 @@ func createTestChannelArbitrator(log ArbitratorLog) (*ChannelArbitrator,
 		MarkCommitmentBroadcasted: func() error {
 			return nil
 		},
-
+		MarkChannelClosed: func(*channeldb.ChannelCloseSummary) error {
+			return nil
+		},
 		ChainArbitratorConfig: chainArbCfg,
 		ChainEvents:           chanEvents,
 	}
