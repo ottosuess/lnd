@@ -136,9 +136,6 @@ func main() {
 	}
 
 	for _, s := range services {
-		if s.GetName() != "Lightning" {
-			continue
-		}
 		for _, m := range s.Methods {
 			name := m.GetName()
 			clientStream := false
@@ -154,6 +151,7 @@ func main() {
 			switch {
 			case !clientStream && !serverStream:
 				p := rpcParams{
+					ServiceName: s.GetName(),
 					MethodName:  m.GetName(),
 					RequestType: m.GetInputType()[1:],
 					Comment:     godoc[name],
@@ -165,6 +163,7 @@ func main() {
 				}
 			case !clientStream && serverStream:
 				p := rpcParams{
+					ServiceName: s.GetName(),
 					MethodName:  m.GetName(),
 					RequestType: m.GetInputType()[1:],
 					Comment:     godoc[name],
@@ -176,6 +175,7 @@ func main() {
 				}
 			case clientStream && serverStream:
 				p := rpcParams{
+					ServiceName: s.GetName(),
 					MethodName:  m.GetName(),
 					RequestType: m.GetInputType()[1:],
 					Comment:     godoc[name],
@@ -191,6 +191,7 @@ func main() {
 }
 
 type rpcParams struct {
+	ServiceName string
 	MethodName  string
 	RequestType string
 	Comment     string
@@ -220,10 +221,11 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 		newProto: func() proto.Message {
 			return &{{.RequestType}}{}
 		},
-		getSync: func(ctx context.Context, client lnrpc.LightningClient,
+		getSync: func(ctx context.Context, client interface{},
 			req proto.Message) (proto.Message, error) {
 			r := req.(*{{.RequestType}})
-			return client.{{.MethodName}}(ctx, r)
+			c := client.(lnrpc.{{.ServiceName}}Client)
+			return c.{{.MethodName}}(ctx, r)
 		},
 	}
 	s.start(msg, callback)
@@ -242,7 +244,7 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 			return &{{.RequestType}}{}
 		},
 		recvStream: func(ctx context.Context,
-			client lnrpc.LightningClient,
+			client lnrpc.{{.ServiceName}}Client,
 			req proto.Message) (*receiver, error) {
 			r := req.(*{{.RequestType}})
 			stream, err := client.{{.MethodName}}(ctx, r)
@@ -273,7 +275,7 @@ func {{.MethodName}}(callback Callback) (SendStream, error) {
 			return &{{.RequestType}}{}
 		},
 		biStream: func(ctx context.Context,
-			client lnrpc.LightningClient) (*receiver, *sender,
+			client lnrpc.{{.ServiceName}}Client) (*receiver, *sender,
 			error) {
 			stream, err := client.{{.MethodName}}(ctx)
 			if err != nil {

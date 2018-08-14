@@ -111,7 +111,7 @@ type onceHandler struct {
 
 	// getSync calls the desired method on the given client in a
 	// blocking matter.
-	getSync func(context.Context, lnrpc.LightningClient,
+	getSync func(context.Context, interface{},
 		proto.Message) (proto.Message, error)
 }
 
