@@ -140,16 +140,6 @@ func main() {
 			continue
 		}
 		for _, m := range s.Methods {
-			if m.GetName() == "GetInfo" {
-				continue
-			}
-			if m.GetName() == "SubscribeInvoices" {
-				continue
-			}
-			if m.GetName() == "SendPayment" {
-				continue
-			}
-
 			name := m.GetName()
 			clientStream := false
 			serverStream := false
