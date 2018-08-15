@@ -5,9 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/roasbeef/btcd/btcec"
-	"github.com/roasbeef/btcd/wire"
 )
 
 const (
@@ -125,8 +125,8 @@ type signJobResp struct {
 // TODO(roasbeef): rename?
 //  * ecdsaPool?
 type sigPool struct {
-	started uint32
-	stopped uint32
+	started uint32 // To be used atomically.
+	stopped uint32 // To be used atomically.
 
 	signer Signer
 

@@ -51,8 +51,8 @@ var (
 // and the current block height. DecayedLog wraps boltdb for simplicity and
 // batches writes to the database to decrease write contention.
 type DecayedLog struct {
-	started int32
-	stopped int32
+	started int32 // To be used atomically.
+	stopped int32 // To be used atomically.
 
 	dbPath string
 
@@ -103,7 +103,7 @@ func (d *DecayedLog) Start() error {
 
 	// Start garbage collector.
 	if d.notifier != nil {
-		epochClient, err := d.notifier.RegisterBlockEpochNtfn()
+		epochClient, err := d.notifier.RegisterBlockEpochNtfn(nil)
 		if err != nil {
 			return fmt.Errorf("Unable to register for epoch "+
 				"notifications: %v", err)

@@ -20,13 +20,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	macaroon "gopkg.in/macaroon.v2"
 
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/go-errors/errors"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/macaroons"
-	"github.com/roasbeef/btcd/chaincfg"
-	"github.com/roasbeef/btcd/chaincfg/chainhash"
-	"github.com/roasbeef/btcd/rpcclient"
-	"github.com/roasbeef/btcd/wire"
 )
 
 var (
@@ -249,6 +249,11 @@ func (hn *HarnessNode) DBPath() string {
 	return hn.cfg.DBPath()
 }
 
+// Name returns the name of this node set during initialization.
+func (hn *HarnessNode) Name() string {
+	return hn.cfg.Name
+}
+
 // Start launches a new process running lnd. Additionally, the PID of the
 // launched process is saved in order to possibly kill the process forcibly
 // later.
@@ -297,8 +302,10 @@ func (hn *HarnessNode) start(lndError chan<- error) error {
 						hex.EncodeToString(hn.PubKey[:logPubKeyBytes]))
 					err := os.Rename(fileName, newFileName)
 					if err != nil {
-						fmt.Errorf("could not rename %s to %s: %v",
-							fileName, newFileName, err)
+						fmt.Printf("could not rename "+
+							"%s to %s: %v\n",
+							fileName, newFileName,
+							err)
 					}
 				}
 			}
@@ -330,9 +337,11 @@ func (hn *HarnessNode) start(lndError chan<- error) error {
 	// Launch a new goroutine which that bubbles up any potential fatal
 	// process errors to the goroutine running the tests.
 	hn.processExit = make(chan struct{})
+	hn.wg.Add(1)
 	go func() {
-		err := hn.cmd.Wait()
+		defer hn.wg.Done()
 
+		err := hn.cmd.Wait()
 		if err != nil {
 			lndError <- errors.Errorf("%v\n%v\n", err, errb.String())
 		}
@@ -474,7 +483,7 @@ func (hn *HarnessNode) writePidFile() error {
 	return nil
 }
 
-// connectRPC uses the TLS certificate and admin macaroon files written by the
+// ConnectRPC uses the TLS certificate and admin macaroon files written by the
 // lnd node to create a gRPC client connection.
 func (hn *HarnessNode) ConnectRPC(useMacs bool) (*grpc.ClientConn, error) {
 	// Wait until TLS certificate and admin macaroon are created before
@@ -634,9 +643,9 @@ func (hn *HarnessNode) lightningNetworkWatcher() {
 	go func() {
 		defer hn.wg.Done()
 
-		ctxb := context.Background()
 		req := &lnrpc.GraphTopologySubscription{}
-		topologyClient, err := hn.SubscribeChannelGraph(ctxb, req)
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		topologyClient, err := hn.SubscribeChannelGraph(ctx, req)
 		if err != nil {
 			// We panic here in case of an error as failure to
 			// create the topology client will cause all subsequent
@@ -644,6 +653,8 @@ func (hn *HarnessNode) lightningNetworkWatcher() {
 			panic(fmt.Errorf("unable to create topology "+
 				"client: %v", err))
 		}
+
+		defer cancelFunc()
 
 		for {
 			update, err := topologyClient.Recv()

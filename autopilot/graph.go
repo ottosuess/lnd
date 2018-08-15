@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcutil"
 	"github.com/coreos/bbolt"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/roasbeef/btcd/btcec"
-	"github.com/roasbeef/btcutil"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 	_, _ = testSig.R.SetString("63724406601629180062774974542967536251589935445068131219452686511677818569431", 10)
 	_, _ = testSig.S.SetString("18801056069249825825291287104931333862866033135609736119018462340006816851118", 10)
 
-	chanIDCounter uint64
+	chanIDCounter uint64 // To be used atomically.
 )
 
 // databaseChannelGraph wraps a channeldb.ChannelGraph instance with the
@@ -84,6 +84,17 @@ func (d dbNode) Addrs() []net.Addr {
 func (d dbNode) ForEachChannel(cb func(ChannelEdge) error) error {
 	return d.node.ForEachChannel(d.tx, func(tx *bolt.Tx,
 		ei *channeldb.ChannelEdgeInfo, ep, _ *channeldb.ChannelEdgePolicy) error {
+
+		// Skip channels for which no outgoing edge policy is available.
+		//
+		// TODO(joostjager): Ideally the case where channels have a nil
+		// policy should be supported, as auto pilot is not looking at
+		// the policies. For now, it is not easily possible to get a
+		// reference to the other end LightningNode object without
+		// retrieving the policy.
+		if ep == nil {
+			return nil
+		}
 
 		pubkey, _ := ep.Node.PubKey()
 		edge := ChannelEdge{

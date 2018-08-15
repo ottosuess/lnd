@@ -5,12 +5,12 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/roasbeef/btcd/wire"
 )
 
 const (
@@ -85,8 +85,10 @@ type ChannelArbitratorConfig struct {
 
 	// ForceCloseChan should force close the contract that this attendant
 	// is watching over. We'll use this when we decide that we need to go
-	// to chain. The returned summary contains all items needed to
-	// eventually resolve all outputs on chain.
+	// to chain. It should in addition tell the switch to remove the
+	// corresponding link, such that we won't accept any new updates. The
+	// returned summary contains all items needed to eventually resolve all
+	// outputs on chain.
 	ForceCloseChan func() (*lnwallet.LocalForceCloseSummary, error)
 
 	// MarkCommitmentBroadcasted should mark the channel as the commitment
@@ -146,8 +148,8 @@ func newHtlcSet(htlcs []channeldb.HTLC) htlcSet {
 // broadcasting to ensure that we avoid any possibility of race conditions, and
 // sweep the output(s) without contest.
 type ChannelArbitrator struct {
-	started int32
-	stopped int32
+	started int32 // To be used atomically.
+	stopped int32 // To be used atomically.
 
 	// log is a persistent log that the attendant will use to checkpoint
 	// its next action, and the state of any unresolved contracts.
@@ -229,6 +231,7 @@ func (c *ChannelArbitrator) Start() error {
 	// machine can act accordingly.
 	c.state, err = c.log.CurrentState()
 	if err != nil {
+		c.cfg.BlockEpochs.Cancel()
 		return err
 	}
 
@@ -237,6 +240,7 @@ func (c *ChannelArbitrator) Start() error {
 
 	_, bestHeight, err := c.cfg.ChainIO.GetBestBlock()
 	if err != nil {
+		c.cfg.BlockEpochs.Cancel()
 		return err
 	}
 
@@ -247,6 +251,7 @@ func (c *ChannelArbitrator) Start() error {
 		uint32(bestHeight), chainTrigger, nil,
 	)
 	if err != nil {
+		c.cfg.BlockEpochs.Cancel()
 		return err
 	}
 
@@ -260,6 +265,7 @@ func (c *ChannelArbitrator) Start() error {
 		// relaunch all contract resolvers.
 		unresolvedContracts, err = c.log.FetchUnresolvedContracts()
 		if err != nil {
+			c.cfg.BlockEpochs.Cancel()
 			return err
 		}
 
@@ -298,8 +304,6 @@ func (c *ChannelArbitrator) Stop() error {
 
 	close(c.quit)
 	c.wg.Wait()
-
-	c.cfg.BlockEpochs.Cancel()
 
 	return nil
 }
@@ -434,9 +438,10 @@ func (c *ChannelArbitrator) stateStep(triggerHeight uint32,
 		// Now that we have all the actions decided for the set of
 		// HTLC's, we'll broadcast the commitment transaction, and
 		// signal the link to exit.
-		//
-		// TODO(roasbeef): need to report to switch that channel is
-		// inactive, should close link
+
+		// We'll tell the switch that it should remove the link for
+		// this channel, in addition to fetching the force close
+		// summary needed to close this channel on chain.
 		closeSummary, err := c.cfg.ForceCloseChan()
 		if err != nil {
 			log.Errorf("ChannelArbitrator(%v): unable to "+
@@ -1286,7 +1291,10 @@ func (c *ChannelArbitrator) UpdateContractSignals(newSignals *ContractSignals) {
 func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 
 	// TODO(roasbeef): tell top chain arb we're done
-	defer c.wg.Done()
+	defer func() {
+		c.cfg.BlockEpochs.Cancel()
+		c.wg.Done()
+	}()
 
 	for {
 		select {
@@ -1356,10 +1364,16 @@ func (c *ChannelArbitrator) channelAttendant(bestHeight int32) {
 			)
 
 		// We've cooperatively closed the channel, so we're no longer
-		// needed.
+		// needed. We'll mark the channel as resolved and exit.
 		case <-c.cfg.ChainEvents.CooperativeClosure:
 			log.Infof("ChannelArbitrator(%v) closing due to co-op "+
 				"closure", c.cfg.ChanPoint)
+
+			if err := c.cfg.MarkChannelResolved(); err != nil {
+				log.Errorf("Unable to mark contract "+
+					"resolved: %v", err)
+			}
+
 			return
 
 		// We have broadcasted our commitment, and it is now confirmed

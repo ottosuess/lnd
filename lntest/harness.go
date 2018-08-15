@@ -11,14 +11,14 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/grpclog"
 
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/integration/rpctest"
+	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
 	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/roasbeef/btcd/chaincfg"
-	"github.com/roasbeef/btcd/chaincfg/chainhash"
-	"github.com/roasbeef/btcd/integration/rpctest"
-	"github.com/roasbeef/btcd/rpcclient"
-	"github.com/roasbeef/btcd/txscript"
-	"github.com/roasbeef/btcd/wire"
-	"github.com/roasbeef/btcutil"
 )
 
 // NetworkHarness is an integration testing harness for the lightning network.
@@ -172,7 +172,8 @@ func (n *NetworkHarness) SetUp(lndArgs []string) error {
 				PkScript: addrScript,
 				Value:    btcutil.SatoshiPerBitcoin,
 			}
-			if _, err := n.Miner.SendOutputs([]*wire.TxOut{output}, 30); err != nil {
+			_, err = n.Miner.SendOutputs([]*wire.TxOut{output}, 7500)
+			if err != nil {
 				return err
 			}
 		}
@@ -564,6 +565,13 @@ func (n *NetworkHarness) ShutdownNode(node *HarnessNode) error {
 
 	delete(n.activeNodes, node.NodeID)
 	return nil
+}
+
+// StopNode stops the target node, but doesn't yet clean up its directories.
+// This can be used to temporarily bring a node down during a test, to be later
+// started up again.
+func (n *NetworkHarness) StopNode(node *HarnessNode) error {
+	return node.stop()
 }
 
 // TODO(roasbeef): add a WithChannel higher-order function?
@@ -998,8 +1006,8 @@ func (n *NetworkHarness) WaitForChannelClose(ctx context.Context,
 	}
 }
 
-// AssertChannelExists asserts that an active channel identified by
-// channelPoint is known to exist from the point-of-view of node..
+// AssertChannelExists asserts that an active channel identified by the
+// specified channel point exists from the point-of-view of the node.
 func (n *NetworkHarness) AssertChannelExists(ctx context.Context,
 	node *HarnessNode, chanPoint *wire.OutPoint) error {
 
@@ -1015,7 +1023,7 @@ func (n *NetworkHarness) AssertChannelExists(ctx context.Context,
 
 		for _, channel := range resp.Channels {
 			if channel.ChannelPoint == chanPoint.String() {
-				return true
+				return channel.Active
 			}
 
 		}
@@ -1035,8 +1043,12 @@ func (n *NetworkHarness) AssertChannelExists(ctx context.Context,
 // several running lnd nodes. This function gives callers a way to assert that
 // some property is upheld within a particular time frame.
 func WaitPredicate(pred func() bool, timeout time.Duration) error {
+	const pollInterval = 20 * time.Millisecond
+
 	exitTimer := time.After(timeout)
 	for {
+		<-time.After(pollInterval)
+
 		select {
 		case <-exitTimer:
 			return fmt.Errorf("predicate not satisfied after time out")
@@ -1148,7 +1160,8 @@ func (n *NetworkHarness) sendCoins(ctx context.Context, amt btcutil.Amount,
 		PkScript: addrScript,
 		Value:    int64(amt),
 	}
-	if _, err := n.Miner.SendOutputs([]*wire.TxOut{output}, 30); err != nil {
+	_, err = n.Miner.SendOutputs([]*wire.TxOut{output}, 7500)
+	if err != nil {
 		return err
 	}
 

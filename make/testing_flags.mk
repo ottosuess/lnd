@@ -20,9 +20,11 @@ TEST_FLAGS += -test.run=TestLightningNetworkDaemon/$(icase)
 endif
 
 # If a timeout was requested, construct initialize the proper flag for the go
-# test command.
+# test command. If not, we set 20m (up from the default 10m).
 ifneq ($(timeout),)
 TEST_FLAGS += -test.timeout=$(timeout)
+else
+TEST_FLAGS += -test.timeout=20m
 endif
 
 # UNIT_TARGTED is undefined iff a specific package and/or unit test case is
@@ -44,4 +46,4 @@ endif
 
 # Construct the integration test command with the added build flags.
 ITEST_TAGS := $(TEST_TAGS) rpctest
-ITEST := $(GOTEST) -tags="$(ITEST_TAGS)" $(TEST_FLAGS) -logoutput
+ITEST := rm output*.log; date; $(GOTEST) -tags="$(ITEST_TAGS)" $(TEST_FLAGS) -logoutput
