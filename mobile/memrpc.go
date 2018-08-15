@@ -81,7 +81,7 @@ type sender struct {
 }
 
 // getClient returns a client connection to the server listening on lis.
-func getClient() (lnrpc.LightningClient, context.Context, func(), error) {
+func getClient(serviceName string) (interface{}, context.Context, func(), error) {
 	conn, err := lis.Dial()
 	if err != nil {
 		return nil, nil, nil, err
@@ -98,7 +98,13 @@ func getClient() (lnrpc.LightningClient, context.Context, func(), error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	client := lnrpc.NewLightningClient(clientConn)
+
+	var client interface{}
+	if serviceName == "Lightning" {
+		client = lnrpc.NewLightningClient(clientConn)
+	} else if serviceName == "WalletUnlocker" {
+		client = lnrpc.NewWalletUnlockerClient(clientConn)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return client, ctx, cancel, nil
 }
@@ -117,7 +123,7 @@ type onceHandler struct {
 
 // start executes the RPC call specified by this onceHandler using the
 // specified serialized msg request.
-func (s *onceHandler) start(msg []byte, callback Callback) {
+func (s *onceHandler) start(msg []byte, callback Callback, serviceName string) {
 	// We must make a copy of the passed byte slice, as there is no
 	// guarantee the contents won't be changed while the go routine is
 	// executing.
@@ -135,7 +141,7 @@ func (s *onceHandler) start(msg []byte, callback Callback) {
 		}
 
 		// Get the gRPC client.
-		client, ctx, cancel, err := getClient()
+		client, ctx, cancel, err := getClient(serviceName)
 		if err != nil {
 			callback.OnError(err)
 			return
@@ -193,7 +199,7 @@ func (s *readStreamHandler) start(msg []byte, callback Callback) {
 		}
 
 		// Get the client.
-		client, ctx, cancel, err := getClient()
+		client, ctx, cancel, err := getClient("Lightning")
 		if err != nil {
 			callback.OnError(err)
 			return
@@ -202,7 +208,8 @@ func (s *readStreamHandler) start(msg []byte, callback Callback) {
 
 		// Call the desired method on the client using the decoded gRPC
 		// request, and get the receive stream back.
-		stream, err := s.recvStream(ctx, client, req)
+		c := client.(lnrpc.LightningClient)
+		stream, err := s.recvStream(ctx, c, req)
 		if err != nil {
 			callback.OnError(err)
 			return
@@ -248,13 +255,14 @@ type biStreamHandler struct {
 // messages coming from the returned SendStream.
 func (b *biStreamHandler) start(callback Callback) (SendStream, error) {
 	// Get the client connection.
-	client, ctx, cancel, err := getClient()
+	client, ctx, cancel, err := getClient("Lightning")
 	if err != nil {
 		return nil, err
 	}
 
 	// Start a bidirectional stream for the desired RPC method.
-	r, s, err := b.biStream(ctx, client)
+	c := client.(lnrpc.LightningClient)
+	r, s, err := b.biStream(ctx, c)
 	if err != nil {
 		cancel()
 		return nil, err

@@ -228,7 +228,7 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 			return c.{{.MethodName}}(ctx, r)
 		},
 	}
-	s.start(msg, callback)
+	s.start(msg, callback, "{{.ServiceName}}")
 }
 `))
 
