@@ -91,7 +91,7 @@ var (
 // lndMain is the true entry point for lnd. This function is required since
 // defers created in the top-level scope of a main method aren't executed if
 // os.Exit() is called.
-func LndMain(appDir string, lis net.Listener) error {
+func LndMain(appDir string, lightningLis net.Listener, unlockerLis net.Listener) error {
 	// Load the configuration, and parse any command line options. This
 	// function will also set up logging properly.
 	loadedConfig, err := loadConfig(appDir)
@@ -219,7 +219,7 @@ func LndMain(appDir string, lis net.Listener) error {
 	if !cfg.NoEncryptWallet {
 		walletInitParams, err := waitForWalletPassword(
 			cfg.RPCListeners, cfg.RESTListeners, serverOpts,
-			lis, proxyOpts, tlsConf, macaroonService,
+			unlockerLis, proxyOpts, tlsConf, macaroonService,
 		)
 		if err != nil {
 			return err
@@ -525,11 +525,11 @@ func LndMain(appDir string, lis net.Listener) error {
 
 	// If a listener was provided to main(), we listen on it. If not, we go
 	// on listening on the regular listeners.
-	if lis != nil {
-		defer lis.Close()
+	if lightningLis != nil {
+		defer lightningLis.Close()
 		go func() {
-			rpcsLog.Infof("RPC server listening on %s", lis.Addr())
-			grpcServer.Serve(lis)
+			rpcsLog.Infof("RPC server listening on %s", lightningLis.Addr())
+			grpcServer.Serve(lightningLis)
 		}()
 	} else {
 		// Next, Start the gRPC server listening for HTTP/2 connections.
@@ -882,7 +882,7 @@ type WalletUnlockParams struct {
 func waitForWalletPassword(
 	grpcEndpoints, restEndpoints []string,
 	serverOpts []grpc.ServerOption,
-	lis net.Listener,
+	unlockerLis net.Listener,
 	proxyOpts []grpc.DialOption,
 	tlsConf *tls.Config,
 	macaroonService *macaroons.Service) (*WalletUnlockParams, error) {
@@ -906,12 +906,14 @@ func waitForWalletPassword(
 
 	// If a listener was provided to main(), we listen on it. If not, we go
 	// on listening on the regular listeners.
-	if lis != nil {
+	if unlockerLis != nil {
+		defer unlockerLis.Close()
+
 		wg.Add(1)
 		go func() {
-			rpcsLog.Infof("password RPC server listening on %s", lis.Addr())
+			rpcsLog.Infof("password RPC server listening on %s", unlockerLis.Addr())
 			wg.Done()
-			grpcServer.Serve(lis)
+			grpcServer.Serve(unlockerLis)
 		}()
 	} else {
 		for _, grpcEndpoint := range grpcEndpoints {

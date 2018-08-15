@@ -12,7 +12,13 @@ import (
 )
 
 var (
-	lis = bufconn.Listen(100)
+	lightningLis = bufconn.Listen(100)
+	unlockerLis  = bufconn.Listen(100)
+)
+
+const (
+	lightningService = "Lightning"
+	walletUnlockerService = "WalletUnlocker"
 )
 
 // Callback is an interface that is passed in by callers of the library, and
@@ -82,7 +88,15 @@ type sender struct {
 
 // getClient returns a client connection to the server listening on lis.
 func getClient(serviceName string) (interface{}, context.Context, func(), error) {
-	conn, err := lis.Dial()
+	var conn net.Conn
+	var err error
+
+	if serviceName == lightningService {
+		conn, err = lightningLis.Dial()
+	} else if serviceName == walletUnlockerService {
+		conn, err = unlockerLis.Dial()
+	}
+
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -100,9 +114,9 @@ func getClient(serviceName string) (interface{}, context.Context, func(), error)
 	}
 
 	var client interface{}
-	if serviceName == "Lightning" {
+	if serviceName == lightningService {
 		client = lnrpc.NewLightningClient(clientConn)
-	} else if serviceName == "WalletUnlocker" {
+	} else if serviceName == walletUnlockerService {
 		client = lnrpc.NewWalletUnlockerClient(clientConn)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -199,7 +213,7 @@ func (s *readStreamHandler) start(msg []byte, callback Callback) {
 		}
 
 		// Get the client.
-		client, ctx, cancel, err := getClient("Lightning")
+		client, ctx, cancel, err := getClient(lightningService)
 		if err != nil {
 			callback.OnError(err)
 			return
@@ -255,7 +269,7 @@ type biStreamHandler struct {
 // messages coming from the returned SendStream.
 func (b *biStreamHandler) start(callback Callback) (SendStream, error) {
 	// Get the client connection.
-	client, ctx, cancel, err := getClient("Lightning")
+	client, ctx, cancel, err := getClient(lightningService)
 	if err != nil {
 		return nil, err
 	}
