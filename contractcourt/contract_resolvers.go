@@ -152,7 +152,10 @@ func (h *htlcTimeoutResolver) Resolve() (ContractResolver, error) {
 		log.Tracef("%T(%v): incubating htlc output", h,
 			h.htlcResolution.ClaimOutpoint)
 
-		err := h.IncubateOutputs(h.ChanPoint, nil, &h.htlcResolution, nil)
+		err := h.IncubateOutputs(
+			h.ChanPoint, nil, &h.htlcResolution, nil,
+			h.broadcastHeight,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -568,7 +571,10 @@ func (h *htlcSuccessResolver) Resolve() (ContractResolver, error) {
 		log.Infof("%T(%x): incubating incoming htlc output",
 			h, h.payHash[:])
 
-		err := h.IncubateOutputs(h.ChanPoint, nil, nil, &h.htlcResolution)
+		err := h.IncubateOutputs(
+			h.ChanPoint, nil, nil, &h.htlcResolution,
+			h.broadcastHeight,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -845,7 +851,11 @@ func (h *htlcOutgoingContestResolver) Resolve() (ContractResolver, error) {
 	if err != nil {
 		return nil, err
 	}
-	if uint32(currentHeight) >= h.htlcResolution.Expiry {
+
+	// If the current height is >= expiry-1, then a spend will be valid to
+	// be included in the next block, and we can immediately return the
+	// resolver.
+	if uint32(currentHeight) >= h.htlcResolution.Expiry-1 {
 		log.Infof("%T(%v): HTLC has expired (height=%v, expiry=%v), "+
 			"transforming into timeout resolver", h,
 			h.htlcResolution.ClaimOutpoint)

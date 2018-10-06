@@ -46,21 +46,9 @@
   revision = "8b13a72661dae6e9e5dea04f344f0dc95ea29547"
 
 [[projects]]
-  branch = "master"
   name = "github.com/aead/siphash"
   packages = ["."]
-  revision = "e404fcfc888570cadd1610538e2dbc89f66af814"
-
-[[projects]]
-  name = "github.com/awalterschulze/gographviz"
-  packages = [
-    ".",
-    "ast",
-    "parser",
-    "scanner",
-    "token"
-  ]
-  revision = "761fd5fbb34e4c2c138c280395b65b48e4ff5a53"
+  revision = "83563a290f60225eb120d724600b9690c3fb536f"
 
 [[projects]]
   name = "github.com/btcsuite/btcd"
@@ -79,7 +67,7 @@
     "txscript",
     "wire"
   ]
-  revision = "f899737d7f2764dc13e4d01ff00108ec58f766a9"
+  revision = "79e00513b1011888b1e675157ab89f527f901cae"
 
 [[projects]]
   name = "github.com/btcsuite/btclog"
@@ -118,7 +106,7 @@
     "walletdb/bdb",
     "wtxmgr"
   ]
-  revision = "1ede0a1a66bad8f7db796615e496a0a0faba5182"
+  revision = "421298df22601db0fe4adb8f4be71b7014324ba9"
 
 [[projects]]
   branch = "master"
@@ -250,11 +238,13 @@
   name = "github.com/lightninglabs/neutrino"
   packages = [
     ".",
+    "cache",
+    "cache/lru",
     "filterdb",
     "headerfs",
     "headerlist"
   ]
-  revision = "b451667d69910cd20995452c56e02441896a3349"
+  revision = "bee0ed11601a4ad0c3b23d462cd71089fc11f2cd"
 
 [[projects]]
   name = "github.com/lightningnetwork/lightning-onion"
@@ -268,7 +258,7 @@
     "chaincfg/chainhash",
     "wire"
   ]
-  revision = "5f654d5faab99ee2b3488fabba98e5f7a5257ee3"
+  revision = "cdab10132e8c6e4a3ffd112dba54791946d28906"
 
 [[projects]]
   name = "github.com/miekg/dns"
@@ -323,6 +313,7 @@
     "curve25519",
     "hkdf",
     "internal/chacha20",
+    "internal/subtle",
     "nacl/box",
     "nacl/secretbox",
     "pbkdf2",
@@ -333,7 +324,7 @@
     "scrypt",
     "ssh/terminal"
   ]
-  revision = "49796115aa4b964c318aad4f3084fdb41e9aa067"
+  revision = "614d502a4dac94afa3a6ce146bd1736da82514c6"
 
 [[projects]]
   name = "golang.org/x/net"
@@ -353,14 +344,13 @@
   revision = "ae89d30ce0c63142b652837da33d782e2b0a9b25"
 
 [[projects]]
-  branch = "master"
   name = "golang.org/x/sys"
   packages = [
     "cpu",
     "unix",
     "windows"
   ]
-  revision = "904bdc257025c7b3f43c19360ad3ab85783fad78"
+  revision = "ebe1bf3edb3325c393447059974de898d5133eb8"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -394,6 +384,11 @@
   ]
   revision = "f21a4dfb5e38f5895301dc265a8def02365cc3d0"
   version = "v0.3.0"
+
+[[projects]]
+  name = "golang.org/x/time"
+  packages = ["rate"]
+  revision = "fbb02b2291d28baffd63558aa44b4b56f178d650"
 
 [[projects]]
   name = "google.golang.org/genproto"
@@ -435,10 +430,9 @@
   revision = "41344da2231b913fa3d983840a57a6b1b7b631a1"
 
 [[projects]]
-  branch = "v1"
   name = "gopkg.in/errgo.v1"
   packages = ["."]
-  revision = "c17903c6b19d5dedb9cfba9fa314c7fae63e554f"
+  revision = "b20caedf0710d0988e92b5f2d76843ad1f231f2d"
 
 [[projects]]
   name = "gopkg.in/macaroon-bakery.v2"
@@ -463,6 +457,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7d40ee1ffd01e0cb0cc3a3903e83fab4833430c99be58e42a0c9a7204e792e54"
+  inputs-digest = "5a0d7cd68077fbadf1fcec997dbc9fc683321c3003db2146c0c8fbc4f5b93c8f"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -160,10 +160,6 @@ var (
 			Entity: "address",
 			Action: "write",
 		}},
-		"/lnrpc.Lightning/NewWitnessAddress": {{
-			Entity: "address",
-			Action: "write",
-		}},
 		"/lnrpc.Lightning/SignMessage": {{
 			Entity: "message",
 			Action: "write",
@@ -198,6 +194,10 @@ var (
 			Entity: "onchain",
 			Action: "write",
 		}, {
+			Entity: "offchain",
+			Action: "write",
+		}},
+		"/lnrpc.Lightning/AbandonChannel": {{
 			Entity: "offchain",
 			Action: "write",
 		}},
@@ -534,22 +534,6 @@ func (r *rpcServer) NewAddress(ctx context.Context,
 	return &lnrpc.NewAddressResponse{Address: addr.String()}, nil
 }
 
-// NewWitnessAddress returns a new native witness address under the control of
-// the local wallet.
-func (r *rpcServer) NewWitnessAddress(ctx context.Context,
-	in *lnrpc.NewWitnessAddressRequest) (*lnrpc.NewAddressResponse, error) {
-
-	addr, err := r.server.cc.wallet.NewAddress(
-		lnwallet.NestedWitnessPubKey, false,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	rpcsLog.Infof("[newaddress] addr=%v", addr.String())
-	return &lnrpc.NewAddressResponse{Address: addr.String()}, nil
-}
-
 var (
 	// signedMsgPrefix is a special prefix that we'll prepend to any
 	// messages we sign/verify. We do this to ensure that we don't
@@ -770,6 +754,12 @@ func (r *rpcServer) OpenChannel(in *lnrpc.OpenChannelRequest,
 			"size is: %v SAT", int64(minChanFundingSize))
 	}
 
+	// Ensure that the MinConfs parameter is non-negative.
+	if in.MinConfs < 0 {
+		return errors.New("minimum number of confirmations must be a " +
+			"non-negative number")
+	}
+
 	var (
 		nodePubKey      *btcec.PublicKey
 		nodePubKeyBytes []byte
@@ -813,11 +803,19 @@ func (r *rpcServer) OpenChannel(in *lnrpc.OpenChannelRequest,
 	// Instruct the server to trigger the necessary events to attempt to
 	// open a new channel. A stream is returned in place, this stream will
 	// be used to consume updates of the state of the pending channel.
-	updateChan, errChan := r.server.OpenChannel(
-		nodePubKey, localFundingAmt,
-		lnwire.NewMSatFromSatoshis(remoteInitialBalance),
-		minHtlc, feeRate, in.Private, remoteCsvDelay,
-	)
+	req := &openChanReq{
+		targetPubkey:    nodePubKey,
+		chainHash:       *activeNetParams.GenesisHash,
+		localFundingAmt: localFundingAmt,
+		pushAmt:         lnwire.NewMSatFromSatoshis(remoteInitialBalance),
+		minHtlc:         minHtlc,
+		fundingFeePerKw: feeRate,
+		private:         in.Private,
+		remoteCsvDelay:  remoteCsvDelay,
+		minConfs:        in.MinConfs,
+	}
+
+	updateChan, errChan := r.server.OpenChannel(req)
 
 	var outpoint wire.OutPoint
 out:
@@ -929,6 +927,12 @@ func (r *rpcServer) OpenChannelSync(ctx context.Context,
 			"size is: %v SAT", int64(minChanFundingSize))
 	}
 
+	// Ensure that the MinConfs parameter is non-negative.
+	if in.MinConfs < 0 {
+		return nil, errors.New("minimum number of confirmations must " +
+			"be a non-negative number")
+	}
+
 	// Based on the passed fee related parameters, we'll determine an
 	// appropriate fee rate for the funding transaction.
 	feeRate, err := determineFeePerKw(
@@ -941,12 +945,19 @@ func (r *rpcServer) OpenChannelSync(ctx context.Context,
 	rpcsLog.Tracef("[openchannel] target sat/kw for funding tx: %v",
 		int64(feeRate))
 
-	updateChan, errChan := r.server.OpenChannel(
-		nodepubKey, localFundingAmt,
-		lnwire.NewMSatFromSatoshis(remoteInitialBalance),
-		minHtlc, feeRate, in.Private, remoteCsvDelay,
-	)
+	req := &openChanReq{
+		targetPubkey:    nodepubKey,
+		chainHash:       *activeNetParams.GenesisHash,
+		localFundingAmt: localFundingAmt,
+		pushAmt:         lnwire.NewMSatFromSatoshis(remoteInitialBalance),
+		minHtlc:         minHtlc,
+		fundingFeePerKw: feeRate,
+		private:         in.Private,
+		remoteCsvDelay:  remoteCsvDelay,
+		minConfs:        in.MinConfs,
+	}
 
+	updateChan, errChan := r.server.OpenChannel(req)
 	select {
 	// If an error occurs them immediately return the error to the client.
 	case err := <-errChan:
@@ -1173,9 +1184,78 @@ out:
 	return nil
 }
 
-// fetchActiveChannel attempts to locate a channel identified by its channel
+// AbandonChannel removes all channel state from the database except for a
+// close summary. This method can be used to get rid of permanently unusable
+// channels due to bugs fixed in newer versions of lnd.
+func (r *rpcServer) AbandonChannel(ctx context.Context,
+	in *lnrpc.AbandonChannelRequest) (*lnrpc.AbandonChannelResponse, error) {
+
+	// If this isn't the debug build, then we won't allow the RPC to be
+	// executed, as it's an advanced feature and won't be activated in
+	// regular production/release builds.
+	if !DebugBuild {
+		return nil, fmt.Errorf("AbandonChannel RPC call only " +
+			"available in debug builds")
+	}
+
+	// We'll parse out the arguments to we can obtain the chanPoint of the
+	// target channel.
+	txidHash, err := getChanPointFundingTxid(in.GetChannelPoint())
+	if err != nil {
+		return nil, err
+	}
+	txid, err := chainhash.NewHash(txidHash)
+	if err != nil {
+		return nil, err
+	}
+	index := in.ChannelPoint.OutputIndex
+	chanPoint := wire.NewOutPoint(txid, index)
+
+	// With the chanPoint constructed, we'll attempt to find the target
+	// channel in the database. If we can't find the channel, then we'll
+	// return the error back to the caller.
+	dbChan, err := r.fetchOpenDbChannel(*chanPoint)
+	if err != nil {
+		return nil, err
+	}
+
+	// Now that we've found the channel, we'll populate a close summary for
+	// the channel, so we can store as much information for this abounded
+	// channel as possible. We also ensure that we set Pending to false, to
+	// indicate that this channel has been "fully" closed.
+	_, bestHeight, err := r.server.cc.chainIO.GetBestBlock()
+	if err != nil {
+		return nil, err
+	}
+	summary := &channeldb.ChannelCloseSummary{
+		CloseType:               channeldb.Abandoned,
+		ChanPoint:               *chanPoint,
+		ChainHash:               dbChan.ChainHash,
+		CloseHeight:             uint32(bestHeight),
+		RemotePub:               dbChan.IdentityPub,
+		Capacity:                dbChan.Capacity,
+		SettledBalance:          dbChan.LocalCommitment.LocalBalance.ToSatoshis(),
+		ShortChanID:             dbChan.ShortChanID(),
+		RemoteCurrentRevocation: dbChan.RemoteCurrentRevocation,
+		RemoteNextRevocation:    dbChan.RemoteNextRevocation,
+		LocalChanConfig:         dbChan.LocalChanCfg,
+	}
+
+	// Finally, we'll close the channel in the DB, and return back to the
+	// caller.
+	err = dbChan.CloseChannel(summary)
+	if err != nil {
+		return nil, err
+	}
+
+	return &lnrpc.AbandonChannelResponse{}, nil
+}
+
+// fetchOpenDbChannel attempts to locate a channel identified by its channel
 // point from the database's set of all currently opened channels.
-func (r *rpcServer) fetchActiveChannel(chanPoint wire.OutPoint) (*lnwallet.LightningChannel, error) {
+func (r *rpcServer) fetchOpenDbChannel(chanPoint wire.OutPoint) (
+	*channeldb.OpenChannel, error) {
+
 	dbChannels, err := r.server.chanDB.FetchAllChannels()
 	if err != nil {
 		return nil, err
@@ -1197,7 +1277,22 @@ func (r *rpcServer) fetchActiveChannel(chanPoint wire.OutPoint) (*lnwallet.Light
 		return nil, fmt.Errorf("unable to find channel")
 	}
 
-	// Otherwise, we create a fully populated channel state machine which
+	return dbChan, nil
+}
+
+// fetchActiveChannel attempts to locate a channel identified by its channel
+// point from the database's set of all currently opened channels and
+// return it as a fully popuplated state machine
+func (r *rpcServer) fetchActiveChannel(chanPoint wire.OutPoint) (
+	*lnwallet.LightningChannel, error) {
+
+	dbChan, err := r.fetchOpenDbChannel(chanPoint)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the channel is successfully fetched from the database,
+	// we create a fully populated channel state machine which
 	// uses the db channel as backing storage.
 	return lnwallet.NewLightningChannel(
 		r.server.cc.wallet.Cfg.Signer, nil, dbChan,
@@ -1592,7 +1687,8 @@ func (r *rpcServer) ClosedChannels(ctx context.Context,
 
 	// Show all channels when no filter flags are set.
 	filterResults := in.Cooperative || in.LocalForce ||
-		in.RemoteForce || in.Breach || in.FundingCanceled
+		in.RemoteForce || in.Breach || in.FundingCanceled ||
+		in.Abandoned
 
 	resp := &lnrpc.ClosedChannelsResponse{}
 
@@ -1643,6 +1739,11 @@ func (r *rpcServer) ClosedChannels(ctx context.Context,
 				continue
 			}
 			closeType = lnrpc.ChannelCloseSummary_FUNDING_CANCELED
+		case channeldb.Abandoned:
+			if filterResults && !in.Abandoned {
+				continue
+			}
+			closeType = lnrpc.ChannelCloseSummary_ABANDONED
 		}
 
 		channel := &lnrpc.ChannelCloseSummary{
@@ -2739,6 +2840,7 @@ func createRPCInvoice(invoice *channeldb.Invoice) (*lnrpc.Invoice, error) {
 
 	preimage := invoice.Terms.PaymentPreimage
 	satAmt := invoice.Terms.Value.ToSatoshis()
+	satAmtPaid := invoice.AmtPaid.ToSatoshis()
 
 	return &lnrpc.Invoice{
 		Memo:            string(invoice.Memo[:]),
@@ -2757,6 +2859,8 @@ func createRPCInvoice(invoice *channeldb.Invoice) (*lnrpc.Invoice, error) {
 		RouteHints:      routeHints,
 		AddIndex:        invoice.AddIndex,
 		SettleIndex:     invoice.SettleIndex,
+		AmtPaidSat:      int64(satAmtPaid),
+		AmtPaidMsat:     int64(invoice.AmtPaid),
 		AmtPaid:         int64(invoice.AmtPaid),
 	}, nil
 }
@@ -2846,25 +2950,40 @@ func (r *rpcServer) LookupInvoice(ctx context.Context,
 func (r *rpcServer) ListInvoices(ctx context.Context,
 	req *lnrpc.ListInvoiceRequest) (*lnrpc.ListInvoiceResponse, error) {
 
-	dbInvoices, err := r.server.chanDB.FetchAllInvoices(req.PendingOnly)
-	if err != nil {
-		return nil, err
+	// If the number of invoices was not specified, then we'll default to
+	// returning the latest 100 invoices.
+	if req.NumMaxInvoices == 0 {
+		req.NumMaxInvoices = 100
 	}
 
-	invoices := make([]*lnrpc.Invoice, len(dbInvoices))
-	for i, dbInvoice := range dbInvoices {
+	// Next, we'll map the proto request into a format that is understood by
+	// the database.
+	q := channeldb.InvoiceQuery{
+		IndexOffset:    req.IndexOffset,
+		NumMaxInvoices: req.NumMaxInvoices,
+		PendingOnly:    req.PendingOnly,
+		Reversed:       req.Reversed,
+	}
+	invoiceSlice, err := r.server.chanDB.QueryInvoices(q)
+	if err != nil {
+		return nil, fmt.Errorf("unable to query invoices: %v", err)
+	}
 
-		rpcInvoice, err := createRPCInvoice(&dbInvoice)
+	// Before returning the response, we'll need to convert each invoice
+	// into it's proto representation.
+	resp := &lnrpc.ListInvoiceResponse{
+		Invoices:         make([]*lnrpc.Invoice, len(invoiceSlice.Invoices)),
+		FirstIndexOffset: invoiceSlice.FirstIndexOffset,
+		LastIndexOffset:  invoiceSlice.LastIndexOffset,
+	}
+	for i, invoice := range invoiceSlice.Invoices {
+		resp.Invoices[i], err = createRPCInvoice(&invoice)
 		if err != nil {
 			return nil, err
 		}
-
-		invoices[i] = rpcInvoice
 	}
 
-	return &lnrpc.ListInvoiceResponse{
-		Invoices: invoices,
-	}, nil
+	return resp, nil
 }
 
 // SubscribeInvoices returns a uni-directional stream (server -> client) for
@@ -2969,11 +3088,18 @@ func (r *rpcServer) GetTransactions(ctx context.Context,
 			destAddresses = append(destAddresses, destAddress.EncodeAddress())
 		}
 
+		// We also get unconfirmed transactions, so BlockHash can be
+		// nil.
+		blockHash := ""
+		if tx.BlockHash != nil {
+			blockHash = tx.BlockHash.String()
+		}
+
 		txDetails.Transactions[i] = &lnrpc.Transaction{
 			TxHash:           tx.Hash.String(),
 			Amount:           int64(tx.Value),
 			NumConfirmations: tx.NumConfirmations,
-			BlockHash:        tx.BlockHash.String(),
+			BlockHash:        blockHash,
 			BlockHeight:      tx.BlockHeight,
 			TimeStamp:        tx.Timestamp,
 			TotalFees:        tx.TotalFees,
@@ -3603,10 +3729,15 @@ func (r *rpcServer) ListPayments(ctx context.Context,
 			path[i] = hex.EncodeToString(hop[:])
 		}
 
+		msatValue := int64(payment.Terms.Value)
+		satValue := int64(payment.Terms.Value.ToSatoshis())
+
 		paymentHash := sha256.Sum256(payment.PaymentPreimage[:])
 		paymentsResp.Payments[i] = &lnrpc.Payment{
 			PaymentHash:     hex.EncodeToString(paymentHash[:]),
-			Value:           int64(payment.Terms.Value.ToSatoshis()),
+			Value:           satValue,
+			ValueMsat:       msatValue,
+			ValueSat:        satValue,
 			CreationDate:    payment.CreationDate.Unix(),
 			Path:            path,
 			Fee:             int64(payment.Fee.ToSatoshis()),

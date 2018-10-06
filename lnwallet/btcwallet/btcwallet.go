@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -255,15 +254,12 @@ func (b *BtcWallet) NewAddress(t lnwallet.AddressType, change bool) (btcutil.Add
 	return b.wallet.NewAddress(defaultAccount, keyScope)
 }
 
-// GetPrivKey retrieves the underlying private key associated with the passed
-// address. If the we're unable to locate the proper private key, then a
-// non-nil error will be returned.
+// IsOurAddress checks if the passed address belongs to this wallet
 //
 // This is a part of the WalletController interface.
-func (b *BtcWallet) GetPrivKey(a btcutil.Address) (*btcec.PrivateKey, error) {
-	// Using the ID address, request the private key corresponding to the
-	// address from the wallet's address manager.
-	return b.wallet.PrivKeyForAddress(a)
+func (b *BtcWallet) IsOurAddress(a btcutil.Address) bool {
+	result, err := b.wallet.HaveAddress(a)
+	return result && (err == nil)
 }
 
 // SendOutputs funds, signs, and broadcasts a Bitcoin transaction paying out to
@@ -559,9 +555,11 @@ func (b *BtcWallet) ListTransactionDetails() ([]*lnwallet.TransactionDetail, err
 	bestBlock := b.wallet.Manager.SyncedTo()
 	currentHeight := bestBlock.Height
 
-	// TODO(roasbeef): can replace with start "wallet birthday"
+	// We'll attempt to find all unconfirmed transactions (height of -1),
+	// as well as all transactions that are known to have confirmed at this
+	// height.
 	start := base.NewBlockIdentifierFromHeight(0)
-	stop := base.NewBlockIdentifierFromHeight(bestBlock.Height)
+	stop := base.NewBlockIdentifierFromHeight(-1)
 	txns, err := b.wallet.GetTransactions(start, stop, nil)
 	if err != nil {
 		return nil, err

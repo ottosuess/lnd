@@ -89,6 +89,11 @@ type TxConfNotifier struct {
 	// at which the transaction will have sufficient confirmations.
 	ntfnsByConfirmHeight map[uint32]map[*ConfNtfn]struct{}
 
+	// hintCache is a cache used to maintain the latest height hints for
+	// transactions. Each height hint represents the earliest height at
+	// which the transactions could have been confirmed within the chain.
+	hintCache ConfirmHintCache
+
 	// quit is closed in order to signal that the notifier is gracefully
 	// exiting.
 	quit chan struct{}
@@ -98,13 +103,16 @@ type TxConfNotifier struct {
 
 // NewTxConfNotifier creates a TxConfNotifier. The current height of the
 // blockchain is accepted as a parameter.
-func NewTxConfNotifier(startHeight uint32, reorgSafetyLimit uint32) *TxConfNotifier {
+func NewTxConfNotifier(startHeight uint32, reorgSafetyLimit uint32,
+	hintCache ConfirmHintCache) *TxConfNotifier {
+
 	return &TxConfNotifier{
 		currentHeight:        startHeight,
 		reorgSafetyLimit:     reorgSafetyLimit,
 		confNotifications:    make(map[chainhash.Hash]map[uint64]*ConfNtfn),
 		txsByInitialHeight:   make(map[uint32]map[chainhash.Hash]struct{}),
 		ntfnsByConfirmHeight: make(map[uint32]map[*ConfNtfn]struct{}),
+		hintCache:            hintCache,
 		quit:                 make(chan struct{}),
 	}
 }
@@ -130,6 +138,16 @@ func (tcn *TxConfNotifier) Register(ntfn *ConfNtfn) error {
 	if !ok {
 		ntfns = make(map[uint64]*ConfNtfn)
 		tcn.confNotifications[*ntfn.TxID] = ntfns
+
+		err := tcn.hintCache.CommitConfirmHint(
+			tcn.currentHeight, *ntfn.TxID,
+		)
+		if err != nil {
+			// The error is not fatal, so we should not return an
+			// error to the caller.
+			Log.Errorf("Unable to update confirm hint to %d for "+
+				"%v: %v", tcn.currentHeight, *ntfn.TxID, err)
+		}
 	}
 
 	ntfns[ntfn.ConfID] = ntfn
@@ -175,6 +193,14 @@ func (tcn *TxConfNotifier) UpdateConfDetails(txid chainhash.Hash,
 		return nil
 	}
 
+	err := tcn.hintCache.CommitConfirmHint(details.BlockHeight, txid)
+	if err != nil {
+		// The error is not fatal, so we should not return an error to
+		// the caller.
+		Log.Errorf("Unable to update confirm hint to %d for %v: %v",
+			details.BlockHeight, txid, err)
+	}
+
 	// The notifier has yet to reach the height at which the transaction was
 	// included in a block, so we should defer until handling it then within
 	// ConnectTip.
@@ -185,7 +211,7 @@ func (tcn *TxConfNotifier) UpdateConfDetails(txid chainhash.Hash,
 	ntfn.details = details
 
 	// Now, we'll examine whether the transaction of this notification
-	// request has reched its required number of confirmations. If it has,
+	// request has reached its required number of confirmations. If it has,
 	// we'll disaptch a confirmation notification to the caller.
 	confHeight := details.BlockHeight + ntfn.NumConfirmations - 1
 	if confHeight <= tcn.currentHeight {
@@ -297,6 +323,48 @@ func (tcn *TxConfNotifier) ConnectTip(blockHash *chainhash.Hash,
 		}
 	}
 
+	// In order to update the height hint for all the required transactions
+	// under one database transaction, we'll gather the set of unconfirmed
+	// transactions along with the ones that confirmed at the current
+	// height. To do so, we'll iterate over the confNotifications map, which
+	// contains the transactions we currently have notifications for. Since
+	// this map doesn't tell us whether the transaction hsa confirmed or
+	// not, we'll need to look at txsByInitialHeight to determine so.
+	var txsToUpdateHints []chainhash.Hash
+	for confirmedTx := range tcn.txsByInitialHeight[tcn.currentHeight] {
+		txsToUpdateHints = append(txsToUpdateHints, confirmedTx)
+	}
+out:
+	for maybeUnconfirmedTx := range tcn.confNotifications {
+		for height, confirmedTxs := range tcn.txsByInitialHeight {
+			// Skip the transactions that confirmed at the new block
+			// height as those have already been added.
+			if height == blockHeight {
+				continue
+			}
+
+			// If the transaction was found within the set of
+			// confirmed transactions at this height, we'll skip it.
+			if _, ok := confirmedTxs[maybeUnconfirmedTx]; ok {
+				continue out
+			}
+		}
+		txsToUpdateHints = append(txsToUpdateHints, maybeUnconfirmedTx)
+	}
+
+	if len(txsToUpdateHints) > 0 {
+		err := tcn.hintCache.CommitConfirmHint(
+			tcn.currentHeight, txsToUpdateHints...,
+		)
+		if err != nil {
+			// The error is not fatal, so we should not return an
+			// error to the caller.
+			Log.Errorf("Unable to update confirm hint to %d for "+
+				"%v: %v", tcn.currentHeight, txsToUpdateHints,
+				err)
+		}
+	}
+
 	// Next, we'll dispatch an update to all of the notification clients for
 	// our watched transactions with the number of confirmations left at
 	// this new height.
@@ -383,6 +451,19 @@ func (tcn *TxConfNotifier) DisconnectTip(blockHeight uint32) error {
 	}
 	tcn.currentHeight--
 	tcn.reorgDepth++
+
+	// Rewind the height hint for all watched transactions.
+	var txs []chainhash.Hash
+	for tx := range tcn.confNotifications {
+		txs = append(txs, tx)
+	}
+
+	err := tcn.hintCache.CommitConfirmHint(tcn.currentHeight, txs...)
+	if err != nil {
+		Log.Errorf("Unable to update confirm hint to %d for %v: %v",
+			tcn.currentHeight, txs, err)
+		return err
+	}
 
 	// We'll go through all of our watched transactions and attempt to drain
 	// their notification channels to ensure sending notifications to the
