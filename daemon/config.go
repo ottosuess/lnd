@@ -249,7 +249,7 @@ type config struct {
 // 	4) Parse CLI options and overwrite/add any specified options
 func loadConfig(appDir string) (*config, error) {
 	defaultCfg := config{
-		LndDir:         defaultLndDir,
+		LndDir:         appDir,
 		ConfigFile:     defaultConfigFile,
 		DataDir:        defaultDataDir,
 		DebugLevel:     defaultLogLevel,
@@ -311,12 +311,7 @@ func loadConfig(appDir string) (*config, error) {
 		net: &tor.ClearNet{},
 	}
 
-	// Pre-parse the command line options to pick up an alternative config
-	// file.
 	preCfg := defaultCfg
-	if _, err := flags.Parse(&preCfg); err != nil {
-		return nil, err
-	}
 
 	// Show the version and exit if the version flag was specified.
 	appName := filepath.Base(os.Args[0])
@@ -353,12 +348,6 @@ func loadConfig(appDir string) (*config, error) {
 		}
 
 		configFileError = err
-	}
-
-	// Finally, parse the remaining command line options again to ensure
-	// they take precedence.
-	if _, err := flags.Parse(&cfg); err != nil {
-		return nil, err
 	}
 
 	// If the provided lnd directory is not the default, we'll modify the
